@@ -44,6 +44,12 @@ async def webhook(request: Request) -> JSONResponse:
                     f"https://api.telegram.org/bot{config.telegram_bot_token}/getMe"
                 )
                 _bot_user_id = resp.json()["result"]["id"]
+                logger.info("Bot user ID fetched: %s", _bot_user_id)
+
+        user = update.message.from_user
+        user_name = f"{user.first_name} ({user.id})" if user else "unknown"
+        logger.info("Webhook received: chat=%s user=%s text=%r",
+                     update.message.chat.id, user_name, update.message.text[:80])
 
         asyncio.create_task(
             handle_message(
@@ -54,6 +60,8 @@ async def webhook(request: Request) -> JSONResponse:
                 telegram_token=config.telegram_bot_token,
             )
         )
+    else:
+        logger.debug("Webhook received non-text update, ignoring")
 
     # Always respond 200 quickly so Telegram doesn't retry
     return JSONResponse({"ok": True})

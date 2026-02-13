@@ -1,5 +1,8 @@
+import logging
 import time
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -26,3 +29,5 @@ class ConversationStore:
         expired = [k for k, v in self._store.items() if now - v.last_activity > self._ttl]
         for k in expired:
             del self._store[k]
+        if expired:
+            logger.info("Cleaned up %d expired conversations, %d remaining", len(expired), len(self._store))

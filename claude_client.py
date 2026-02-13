@@ -1,5 +1,8 @@
+import logging
 from dataclasses import dataclass, field
 import anthropic
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """Eres el asistente de documentos de RK ArtSide SRL. Generas cotizaciones, presupuestos y recibos de pago.
 
@@ -80,6 +83,7 @@ class ClaudeClient:
         if container_id:
             container["id"] = container_id
 
+        logger.info("Claude API call: %d messages, container=%s", len(messages), container_id)
         response = self._client.beta.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=4096,
@@ -89,11 +93,15 @@ class ClaudeClient:
             messages=messages,
             tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
         )
+        logger.info("Claude API response: stop_reason=%s", response.stop_reason)
 
         # Handle pause_turn loops
+        continuation = 0
         for _ in range(MAX_CONTINUATIONS):
             if not self.needs_continuation(response):
                 break
+            continuation += 1
+            logger.info("Claude pause_turn, continuing (%d/%d)", continuation, MAX_CONTINUATIONS)
             messages = messages + [{"role": "assistant", "content": response.content}]
             response = self._client.beta.messages.create(
                 model="claude-sonnet-4-5-20250929",
@@ -104,14 +112,17 @@ class ClaudeClient:
                 messages=messages,
                 tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
             )
+            logger.info("Claude continuation response: stop_reason=%s", response.stop_reason)
 
         return self.extract_response(response)
 
     def download_file(self, file_id: str) -> tuple[str, bytes]:
+        logger.info("Downloading file: %s", file_id)
         metadata = self._client.beta.files.retrieve_metadata(
             file_id=file_id, betas=["files-api-2025-04-14"]
         )
         content = self._client.beta.files.download(
             file_id=file_id, betas=["files-api-2025-04-14"]
         )
+        logger.info("File downloaded: %s (%s)", metadata.filename, file_id)
         return metadata.filename, content.read()
