@@ -26,7 +26,7 @@ class Transcriber:
         logger.info("Downloaded voice file: %s (%d bytes)", file_path, len(audio_bytes))
 
         # Upload to Soniox
-        uploaded = self._client.files.upload_bytes(audio_bytes)
+        uploaded = self._client.files.upload(audio_bytes)
         logger.info("Uploaded to Soniox: file_id=%s", uploaded.id)
 
         try:
