@@ -92,7 +92,19 @@ class ClaudeClient:
         if container_id:
             container["id"] = container_id
 
-        system = SYSTEM_PROMPT + system_extra if system_extra else SYSTEM_PROMPT
+        system_text = SYSTEM_PROMPT + system_extra if system_extra else SYSTEM_PROMPT
+        system = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
+
+        # Mark the last message for caching (covers conversation history)
+        cached_messages = list(messages)
+        if cached_messages:
+            last = cached_messages[-1]
+            content = last.get("content", "")
+            if isinstance(content, str):
+                cached_messages[-1] = {
+                    **last,
+                    "content": [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}],
+                }
 
         logger.info("Claude API call: %d messages, container=%s", len(messages), container_id)
         response = self._client.beta.messages.create(
@@ -101,7 +113,7 @@ class ClaudeClient:
             betas=BETAS,
             system=system,
             container=container,
-            messages=messages,
+            messages=cached_messages,
             tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
         )
         logger.info("Claude API response: stop_reason=%s", response.stop_reason)
