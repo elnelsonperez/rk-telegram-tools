@@ -8,6 +8,8 @@ from transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
 
+# Track chats where we already sent a voice reminder (reset on non-voice messages)
+_voice_reminded: set[int] = set()
 
 _DOC_TYPE_KEYWORDS = {
     "COT": ["cotizaci", "cotización"],
@@ -80,6 +82,11 @@ async def handle_message(
     telegram_token: str,
 ):
     is_voice = message.voice is not None
+    chat_id = message.chat.id
+
+    if not is_voice:
+        _voice_reminded.discard(chat_id)
+
     mentioned = is_bot_mentioned(message, bot_user_id, bot_username) if not is_voice else False
     replied = is_reply_to_bot(message, bot_user_id)
 
@@ -87,8 +94,12 @@ async def handle_message(
     if not is_voice and not mentioned and not replied:
         return
 
-    # For voice messages, only handle if it's a reply to the bot
+    # For voice messages not directed at the bot, send a one-time reminder
     if is_voice and not replied:
+        if chat_id not in _voice_reminded:
+            _voice_reminded.add(chat_id)
+            await _send_text(telegram_token, chat_id, message.message_id,
+                             "Para que pueda escuchar tu nota de voz, responde directamente a uno de mis mensajes.")
         return
 
     if is_voice:
@@ -98,8 +109,6 @@ async def handle_message(
         if not user_text:
             logger.debug("Message matched but extracted text is empty, ignoring")
             return
-
-    chat_id = message.chat.id
 
     if mentioned and not message.reply_to_message:
         root_id = message.message_id  # new conversation
