@@ -75,7 +75,8 @@ async def handle_message(
 
     if mentioned and not message.reply_to_message:
         root_id = message.message_id  # new conversation
-        logger.info("New conversation started: chat=%s root=%s trigger=mention", chat_id, root_id)
+        logger.info("New conversation: chat=%s msg_id=%s root=%s text=%r",
+                     chat_id, message.message_id, root_id, user_text[:80])
     else:
         # Look up root from registry (Telegram only nests reply_to_message 1 level deep)
         replied_to_id = message.reply_to_message.message_id
@@ -83,12 +84,15 @@ async def handle_message(
         if root_id is None:
             # Fallback: use replied-to message as root (e.g., after bot restart)
             root_id = replied_to_id
-            logger.info("Root not in registry, using replied-to msg as root: chat=%s root=%s", chat_id, root_id)
-        logger.info("Continuing conversation: chat=%s root=%s trigger=%s",
-                     chat_id, root_id, "mention+reply" if mentioned else "reply")
+            logger.warning("Root not in registry: chat=%s replied_to=%s, falling back to root=%s",
+                           chat_id, replied_to_id, root_id)
+        logger.info("Continue conversation: chat=%s msg_id=%s root=%s replied_to=%s text=%r",
+                     chat_id, message.message_id, root_id, replied_to_id, user_text[:80])
 
     # Register user's message so future replies to it can find this conversation
     store.register_message(chat_id, message.message_id, root_id)
+    logger.info("Registered msg %s -> root %s (registry size: %d)",
+                message.message_id, root_id, len(store._message_to_root))
 
     conv = store.get_or_create(chat_id=chat_id, root_message_id=root_id)
     conv.messages.append({"role": "user", "content": user_text})
@@ -96,7 +100,7 @@ async def handle_message(
 
     # Send status message while processing
     status_msg_id = await _send_status(telegram_token, chat_id, message.message_id,
-                                        "Generando documento...")
+                                        "Trabajando...")
 
     try:
         result = claude.send_message(conv.messages, container_id=conv.container_id)
@@ -110,14 +114,15 @@ async def handle_message(
 
     conv.container_id = result.container_id
     conv.messages.append({"role": "assistant", "content": result.raw_content})
-    logger.info("Claude response: text_len=%d files=%d container=%s",
-                len(result.text), len(result.file_ids), result.container_id)
+    logger.info("Claude response: text_len=%d files=%d container=%s text=%r",
+                len(result.text), len(result.file_ids), result.container_id, result.text[:120])
 
     # Delete status message, then send text followed by files
     await _delete_message(telegram_token, chat_id, status_msg_id)
 
     if result.text:
         bot_msg_id = await _send_text(telegram_token, chat_id, message.message_id, result.text)
+        logger.info("Text sent: bot_msg_id=%s -> root=%s", bot_msg_id, root_id)
         if bot_msg_id:
             store.register_message(chat_id, bot_msg_id, root_id)
 
@@ -128,6 +133,7 @@ async def handle_message(
                 logger.info("Sending document: %s (%d bytes) to chat=%s", filename, len(content), chat_id)
                 bot_msg_id = await _send_document(http, telegram_token, chat_id, message.message_id,
                                                    filename, content)
+                logger.info("Document sent: bot_msg_id=%s -> root=%s", bot_msg_id, root_id)
                 if bot_msg_id:
                     store.register_message(chat_id, bot_msg_id, root_id)
             except Exception:
@@ -174,9 +180,11 @@ async def _send_text(token: str, chat_id: int, reply_to: int, text: str) -> int 
                 "parse_mode": "Markdown",
             },
         )
+        data = resp.json()
         try:
-            return resp.json()["result"]["message_id"]
+            return data["result"]["message_id"]
         except (KeyError, TypeError):
+            logger.warning("sendMessage failed or missing message_id: %s", data)
             return None
 
 
@@ -189,7 +197,9 @@ async def _send_document(
         data={"chat_id": chat_id, "reply_to_message_id": reply_to},
         files={"document": (filename, content)},
     )
+    data = resp.json()
     try:
-        return resp.json()["result"]["message_id"]
+        return data["result"]["message_id"]
     except (KeyError, TypeError):
+        logger.warning("sendDocument failed or missing message_id: %s", data)
         return None
