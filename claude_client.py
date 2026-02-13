@@ -56,15 +56,23 @@ class ClaudeClient:
     def extract_response(self, response) -> ClaudeResponse:
         texts = []
         file_ids = []
-        for item in response.content:
-            if item.type == "text":
-                texts.append(item.text)
-            elif item.type == "bash_code_execution_tool_result":
+        last_code_exec_idx = -1
+
+        # Find index of last code execution result
+        for i, item in enumerate(response.content):
+            if item.type == "bash_code_execution_tool_result":
+                last_code_exec_idx = i
                 content_item = item.content
                 if content_item.type == "bash_code_execution_result":
                     for file in content_item.content:
                         if hasattr(file, "file_id"):
                             file_ids.append(file.file_id)
+
+        # Only keep text blocks after the last code execution result
+        # If no code execution happened, keep all text blocks
+        for i, item in enumerate(response.content):
+            if item.type == "text" and i > last_code_exec_idx:
+                texts.append(item.text)
 
         return ClaudeResponse(
             text="".join(texts),

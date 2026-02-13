@@ -46,3 +46,43 @@ def test_get_or_create_updates_last_activity():
     time.sleep(0.01)
     store.get_or_create(chat_id=1, root_message_id=100)
     assert conv.last_activity > t1
+
+
+# --- register_message / find_root ---
+
+def test_register_and_find_root():
+    store = ConversationStore()
+    store.register_message(chat_id=1, message_id=101, root_message_id=100)
+    assert store.find_root(chat_id=1, message_id=101) == 100
+
+
+def test_find_root_returns_none_for_unknown():
+    store = ConversationStore()
+    assert store.find_root(chat_id=1, message_id=999) is None
+
+
+def test_find_root_isolates_by_chat():
+    store = ConversationStore()
+    store.register_message(chat_id=1, message_id=101, root_message_id=100)
+    assert store.find_root(chat_id=2, message_id=101) is None
+
+
+def test_cleanup_removes_message_mappings():
+    store = ConversationStore(ttl_seconds=1)
+    conv = store.get_or_create(chat_id=1, root_message_id=100)
+    conv.last_activity = time.time() - 2  # expired
+    store.register_message(chat_id=1, message_id=100, root_message_id=100)
+    store.register_message(chat_id=1, message_id=101, root_message_id=100)
+
+    store.cleanup()
+    assert store.find_root(chat_id=1, message_id=100) is None
+    assert store.find_root(chat_id=1, message_id=101) is None
+
+
+def test_cleanup_preserves_active_message_mappings():
+    store = ConversationStore(ttl_seconds=100)
+    store.get_or_create(chat_id=1, root_message_id=100)
+    store.register_message(chat_id=1, message_id=101, root_message_id=100)
+
+    store.cleanup()
+    assert store.find_root(chat_id=1, message_id=101) == 100

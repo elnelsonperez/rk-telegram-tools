@@ -77,18 +77,32 @@ async def handle_message(
         root_id = message.message_id  # new conversation
         logger.info("New conversation started: chat=%s root=%s trigger=mention", chat_id, root_id)
     else:
-        root_id = find_root_message_id(message)
+        # Look up root from registry (Telegram only nests reply_to_message 1 level deep)
+        replied_to_id = message.reply_to_message.message_id
+        root_id = store.find_root(chat_id, replied_to_id)
+        if root_id is None:
+            # Fallback: use replied-to message as root (e.g., after bot restart)
+            root_id = replied_to_id
+            logger.info("Root not in registry, using replied-to msg as root: chat=%s root=%s", chat_id, root_id)
         logger.info("Continuing conversation: chat=%s root=%s trigger=%s",
                      chat_id, root_id, "mention+reply" if mentioned else "reply")
+
+    # Register user's message so future replies to it can find this conversation
+    store.register_message(chat_id, message.message_id, root_id)
 
     conv = store.get_or_create(chat_id=chat_id, root_message_id=root_id)
     conv.messages.append({"role": "user", "content": user_text})
     logger.info("Sending to Claude: %d messages, container=%s", len(conv.messages), conv.container_id)
 
+    # Send status message while processing
+    status_msg_id = await _send_status(telegram_token, chat_id, message.message_id,
+                                        "Generando documento...")
+
     try:
         result = claude.send_message(conv.messages, container_id=conv.container_id)
     except Exception:
         logger.exception("Claude API error for chat=%s root=%s", chat_id, root_id)
+        await _delete_message(telegram_token, chat_id, status_msg_id)
         await _send_text(telegram_token, chat_id, message.message_id,
                          "Error generando el documento. Intenta de nuevo.")
         conv.messages.pop()  # remove failed user message
@@ -99,24 +113,59 @@ async def handle_message(
     logger.info("Claude response: text_len=%d files=%d container=%s",
                 len(result.text), len(result.file_ids), result.container_id)
 
-    # Send files first, then text
+    # Delete status message, then send text followed by files
+    await _delete_message(telegram_token, chat_id, status_msg_id)
+
+    if result.text:
+        bot_msg_id = await _send_text(telegram_token, chat_id, message.message_id, result.text)
+        if bot_msg_id:
+            store.register_message(chat_id, bot_msg_id, root_id)
+
     async with httpx.AsyncClient() as http:
         for file_id in result.file_ids:
             try:
                 filename, content = claude.download_file(file_id)
                 logger.info("Sending document: %s (%d bytes) to chat=%s", filename, len(content), chat_id)
-                await _send_document(http, telegram_token, chat_id, message.message_id,
-                                     filename, content)
+                bot_msg_id = await _send_document(http, telegram_token, chat_id, message.message_id,
+                                                   filename, content)
+                if bot_msg_id:
+                    store.register_message(chat_id, bot_msg_id, root_id)
             except Exception:
                 logger.exception("Failed to download/send file %s", file_id)
 
-    if result.text:
-        await _send_text(telegram_token, chat_id, message.message_id, result.text)
+
+async def _send_status(token: str, chat_id: int, reply_to: int, text: str) -> int | None:
+    """Send a status message and return its message_id for later deletion."""
+    async with httpx.AsyncClient() as http:
+        resp = await http.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "reply_to_message_id": reply_to,
+            },
+        )
+        try:
+            return resp.json()["result"]["message_id"]
+        except (KeyError, TypeError):
+            logger.warning("Could not get status message_id from response")
+            return None
 
 
-async def _send_text(token: str, chat_id: int, reply_to: int, text: str):
+async def _delete_message(token: str, chat_id: int, message_id: int | None):
+    """Delete a message. Silently ignores failures."""
+    if message_id is None:
+        return
     async with httpx.AsyncClient() as http:
         await http.post(
+            f"https://api.telegram.org/bot{token}/deleteMessage",
+            json={"chat_id": chat_id, "message_id": message_id},
+        )
+
+
+async def _send_text(token: str, chat_id: int, reply_to: int, text: str) -> int | None:
+    async with httpx.AsyncClient() as http:
+        resp = await http.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={
                 "chat_id": chat_id,
@@ -125,14 +174,22 @@ async def _send_text(token: str, chat_id: int, reply_to: int, text: str):
                 "parse_mode": "Markdown",
             },
         )
+        try:
+            return resp.json()["result"]["message_id"]
+        except (KeyError, TypeError):
+            return None
 
 
 async def _send_document(
     http: httpx.AsyncClient, token: str, chat_id: int, reply_to: int,
     filename: str, content: bytes,
-):
-    await http.post(
+) -> int | None:
+    resp = await http.post(
         f"https://api.telegram.org/bot{token}/sendDocument",
         data={"chat_id": chat_id, "reply_to_message_id": reply_to},
         files={"document": (filename, content)},
     )
+    try:
+        return resp.json()["result"]["message_id"]
+    except (KeyError, TypeError):
+        return None
