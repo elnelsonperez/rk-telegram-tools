@@ -1,8 +1,11 @@
+import functools
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import psycopg
 from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
@@ -38,6 +41,19 @@ CREATE TABLE IF NOT EXISTS document_counters (
 DOC_TYPES = {"COT": "Cotización", "PRES": "Presupuesto", "REC": "Recibo"}
 
 
+def _retry_on_disconnect(method):
+    """Retry a method once if the database connection was lost."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except psycopg.OperationalError as e:
+            logger.warning("Database connection lost (%s), retrying...", e)
+            time.sleep(0.5)
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 def _json_default(obj: Any) -> Any:
     """Serialize Anthropic SDK objects (BetaTextBlock, etc.) to dicts."""
     if hasattr(obj, "model_dump"):
@@ -57,6 +73,7 @@ class ConversationStore:
             conninfo=database_url,
             min_size=1,
             max_size=4,
+            check=ConnectionPool.check_connection,
             kwargs={"autocommit": True},
         )
         self._ttl = ttl_seconds
@@ -64,6 +81,7 @@ class ConversationStore:
             conn.execute(_CREATE_TABLES)
         logger.info("ConversationStore: tables ensured")
 
+    @_retry_on_disconnect
     def get_or_create(self, chat_id: int, root_message_id: int) -> Conversation:
         with self._pool.connection() as conn:
             row = conn.execute(
@@ -78,6 +96,7 @@ class ConversationStore:
         messages = json.loads(row[0]) if isinstance(row[0], str) else row[0]
         return Conversation(messages=messages, container_id=row[1])
 
+    @_retry_on_disconnect
     def save(self, chat_id: int, root_message_id: int, conv: Conversation):
         with self._pool.connection() as conn:
             conn.execute(
@@ -89,6 +108,7 @@ class ConversationStore:
                 (json.dumps(conv.messages, default=_json_default), conv.container_id, chat_id, root_message_id),
             )
 
+    @_retry_on_disconnect
     def register_message(self, chat_id: int, message_id: int, root_message_id: int):
         with self._pool.connection() as conn:
             conn.execute(
@@ -100,6 +120,7 @@ class ConversationStore:
                 (chat_id, message_id, root_message_id),
             )
 
+    @_retry_on_disconnect
     def find_root(self, chat_id: int, message_id: int) -> int | None:
         with self._pool.connection() as conn:
             row = conn.execute(
@@ -108,6 +129,7 @@ class ConversationStore:
             ).fetchone()
         return row[0] if row else None
 
+    @_retry_on_disconnect
     def cleanup(self):
         with self._pool.connection() as conn:
             result = conn.execute(
@@ -127,11 +149,13 @@ class ConversationStore:
             if result.rowcount:
                 logger.info("Cleaned up expired conversations/registry entries")
 
+    @_retry_on_disconnect
     def registry_size(self) -> int:
         with self._pool.connection() as conn:
             row = conn.execute("SELECT COUNT(*) FROM message_registry").fetchone()
         return row[0]
 
+    @_retry_on_disconnect
     def next_document_number(self, doc_type: str, year: int) -> str:
         with self._pool.connection() as conn:
             row = conn.execute(
@@ -145,6 +169,7 @@ class ConversationStore:
             ).fetchone()
         return f"{doc_type}-{year}-{row[0]:03d}"
 
+    @_retry_on_disconnect
     def get_last_document_numbers(self, year: int) -> dict[str, str]:
         with self._pool.connection() as conn:
             rows = conn.execute(
