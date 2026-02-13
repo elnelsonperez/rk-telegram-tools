@@ -1,6 +1,7 @@
 import json
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 import psycopg
 
@@ -26,6 +27,13 @@ CREATE TABLE IF NOT EXISTS message_registry (
 CREATE INDEX IF NOT EXISTS idx_message_registry_root
     ON message_registry (chat_id, root_message_id);
 """
+
+
+def _json_default(obj: Any) -> Any:
+    """Serialize Anthropic SDK objects (BetaTextBlock, etc.) to dicts."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 @dataclass
@@ -62,7 +70,7 @@ class ConversationStore:
             SET messages = %s::jsonb, container_id = %s, last_activity = NOW()
             WHERE chat_id = %s AND root_message_id = %s
             """,
-            (json.dumps(conv.messages), conv.container_id, chat_id, root_message_id),
+            (json.dumps(conv.messages, default=_json_default), conv.container_id, chat_id, root_message_id),
         )
 
     def register_message(self, chat_id: int, message_id: int, root_message_id: int):
