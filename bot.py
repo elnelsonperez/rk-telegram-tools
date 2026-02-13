@@ -6,13 +6,21 @@ from conversations import ConversationStore
 logger = logging.getLogger(__name__)
 
 
-def is_bot_mentioned(message, bot_user_id: int) -> bool:
+def is_bot_mentioned(message, bot_user_id: int, bot_username: str = "") -> bool:
     if not message.entities:
         return False
-    return any(
-        e.type == "mention" and e.user and e.user.id == bot_user_id
-        for e in message.entities
-    )
+    text = message.text or ""
+    bot_username_lower = bot_username.lower()
+    for e in message.entities:
+        # text_mention: user without username, has e.user
+        if e.type == "text_mention" and e.user and e.user.id == bot_user_id:
+            return True
+        # mention: @username style, no e.user — compare text
+        if e.type == "mention" and bot_username_lower:
+            mention_text = text[e.offset:e.offset + e.length].lower()
+            if mention_text == f"@{bot_username_lower}":
+                return True
+    return False
 
 
 def is_reply_to_bot(message, bot_user_id: int) -> bool:
@@ -21,13 +29,19 @@ def is_reply_to_bot(message, bot_user_id: int) -> bool:
     return message.reply_to_message.from_user.id == bot_user_id
 
 
-def extract_user_text(message, bot_user_id: int) -> str:
+def extract_user_text(message, bot_user_id: int, bot_username: str = "") -> str:
     text = message.text or ""
+    bot_username_lower = bot_username.lower()
     if message.entities:
         for e in message.entities:
-            if e.type == "mention" and e.user and e.user.id == bot_user_id:
-                mention_text = text[e.offset:e.offset + e.length]
-                text = text.replace(mention_text, "", 1)
+            is_bot = False
+            if e.type == "text_mention" and e.user and e.user.id == bot_user_id:
+                is_bot = True
+            elif e.type == "mention" and bot_username_lower:
+                mention_text = text[e.offset:e.offset + e.length].lower()
+                is_bot = mention_text == f"@{bot_username_lower}"
+            if is_bot:
+                text = text[:e.offset] + text[e.offset + e.length:]
     return text.strip()
 
 
@@ -41,17 +55,18 @@ def find_root_message_id(message) -> int:
 async def handle_message(
     message,
     bot_user_id: int,
+    bot_username: str,
     claude: ClaudeClient,
     store: ConversationStore,
     telegram_token: str,
 ):
-    mentioned = is_bot_mentioned(message, bot_user_id)
+    mentioned = is_bot_mentioned(message, bot_user_id, bot_username)
     replied = is_reply_to_bot(message, bot_user_id)
 
     if not mentioned and not replied:
         return
 
-    user_text = extract_user_text(message, bot_user_id)
+    user_text = extract_user_text(message, bot_user_id, bot_username)
     if not user_text:
         logger.debug("Message matched but extracted text is empty, ignoring")
         return

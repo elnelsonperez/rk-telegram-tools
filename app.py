@@ -18,9 +18,10 @@ config = load_config()
 claude = ClaudeClient(api_key=config.anthropic_api_key, skill_id=config.rk_skill_id)
 store = ConversationStore()
 
-# We need the bot's user ID to detect mentions/replies.
-# This is fetched once on startup via getMe.
+# We need the bot's user ID and username to detect mentions/replies.
+# Fetched once on first webhook via getMe.
 _bot_user_id: int | None = None
+_bot_username: str = ""
 
 
 async def health(request: Request) -> JSONResponse:
@@ -36,15 +37,17 @@ async def webhook(request: Request) -> JSONResponse:
     update = Update.de_json(body, bot=None)
 
     if update and update.message and update.message.text:
-        global _bot_user_id
+        global _bot_user_id, _bot_username
         if _bot_user_id is None:
             import httpx
             async with httpx.AsyncClient() as http:
                 resp = await http.get(
                     f"https://api.telegram.org/bot{config.telegram_bot_token}/getMe"
                 )
-                _bot_user_id = resp.json()["result"]["id"]
-                logger.info("Bot user ID fetched: %s", _bot_user_id)
+                me = resp.json()["result"]
+                _bot_user_id = me["id"]
+                _bot_username = me.get("username", "")
+                logger.info("Bot info fetched: id=%s username=%s", _bot_user_id, _bot_username)
 
         user = update.message.from_user
         user_name = f"{user.first_name} ({user.id})" if user else "unknown"
@@ -55,6 +58,7 @@ async def webhook(request: Request) -> JSONResponse:
             handle_message(
                 message=update.message,
                 bot_user_id=_bot_user_id,
+                bot_username=_bot_username,
                 claude=claude,
                 store=store,
                 telegram_token=config.telegram_bot_token,
