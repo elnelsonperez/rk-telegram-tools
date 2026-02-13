@@ -122,6 +122,7 @@ async def _send_text(token: str, chat_id: int, reply_to: int, text: str):
                 "chat_id": chat_id,
                 "text": text,
                 "reply_to_message_id": reply_to,
+                "parse_mode": "Markdown",
             },
         )
 
