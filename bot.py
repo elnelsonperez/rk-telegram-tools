@@ -102,16 +102,19 @@ async def handle_message(
                              "Para que pueda escuchar tu nota de voz, responde directamente a uno de mis mensajes.")
         return
 
-    # Check if this text message is replying to a voice note
+    # Check if the replied-to message has content we should include
     reply_has_voice = (not is_voice and message.reply_to_message
                        and hasattr(message.reply_to_message, 'voice')
                        and message.reply_to_message.voice is not None)
+    reply_has_text = (not is_voice and mentioned and message.reply_to_message
+                      and not replied
+                      and getattr(message.reply_to_message, 'text', None))
 
     if is_voice:
         user_text = None  # will be transcribed below
     else:
         user_text = extract_user_text(message, bot_user_id, bot_username)
-        if not user_text and not reply_has_voice:
+        if not user_text and not reply_has_voice and not reply_has_text:
             logger.debug("Message matched but extracted text is empty, ignoring")
             return
 
@@ -166,6 +169,10 @@ async def handle_message(
         else:
             # Text reply to a voice note — combine both
             user_text = f"[Nota de voz transcrita]: {transcript}\n\n{user_text or ''}".strip()
+    elif reply_has_text:
+        # Mention in reply to a non-bot message — include the original text as context
+        original_text = message.reply_to_message.text
+        user_text = f"[Mensaje original]: {original_text}\n\n{user_text or ''}".strip()
 
     conv = store.get_or_create(chat_id=chat_id, root_message_id=root_id)
     conv.messages.append({"role": "user", "content": user_text})

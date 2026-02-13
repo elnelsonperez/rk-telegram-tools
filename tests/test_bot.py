@@ -371,3 +371,51 @@ async def test_handle_message_reply_continues_conversation():
     # Should have 4 messages now (2 from first turn + 2 from second turn)
     assert len(conv.messages) == 4
     assert conv.messages[2]["content"] == "quita los itbis"
+
+
+@pytest.mark.asyncio
+async def test_handle_message_mention_reply_to_non_bot_includes_original_text():
+    """Tagging bot in reply to a non-bot message should include the original text."""
+    store = _mock_store()
+
+    # The original message (not from the bot)
+    original = MagicMock()
+    original.message_id = 50
+    original.from_user = MagicMock(id=999)  # not the bot
+    original.reply_to_message = None
+    original.text = "Cotización para Juan, 3 sillas a $5,000 cada una"
+    original.voice = None
+
+    # User replies to their own message tagging the bot
+    entity = _make_entity("mention", offset=0, length=14, user=None)
+    msg = _make_message(text="@rkartside_bot hazme esto", entities=[entity], message_id=60)
+    msg.chat = MagicMock(id=1)
+    msg.reply_to_message = original
+
+    claude = MagicMock()
+    claude.send_message.return_value = ClaudeResponse(
+        text="Generando...", file_ids=[], container_id="c1", raw_content=["mock"],
+    )
+
+    sent_texts = []
+
+    async def mock_send_text(token, chat_id, reply_to, text):
+        sent_texts.append(text)
+        return 700
+
+    with patch("bot._send_status", AsyncMock(return_value=900)), \
+         patch("bot._delete_message", AsyncMock()), \
+         patch("bot._send_text", mock_send_text), \
+         patch("bot._send_document", AsyncMock(return_value=None)):
+        await handle_message(
+            message=msg, bot_user_id=123, bot_username="rkartside_bot",
+            claude=claude, store=store, transcriber=MagicMock(), telegram_token="tok",
+        )
+
+    # Claude should have been called with text that includes the original message
+    call_args = claude.send_message.call_args
+    messages_sent = call_args[0][0]
+    user_msg = messages_sent[0]["content"]  # first message is the user's
+    assert "[Mensaje original]:" in user_msg
+    assert "Cotización para Juan" in user_msg
+    assert "hazme esto" in user_msg
