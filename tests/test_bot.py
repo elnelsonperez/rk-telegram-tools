@@ -253,8 +253,6 @@ async def test_handle_message_sends_status_then_text_then_file():
         )
 
     assert calls == [
-        ("status", "Trabajando..."),
-        ("delete", 999),
         ("text", "Tu cotización:"),
         ("document", "cotizacion.pdf"),
     ]
@@ -298,8 +296,6 @@ async def test_handle_message_deletes_status_on_error():
         )
 
     assert calls == [
-        ("status", "Trabajando..."),
-        ("delete", 888),
         ("text", "Error generando el documento. Intenta de nuevo."),
     ]
 

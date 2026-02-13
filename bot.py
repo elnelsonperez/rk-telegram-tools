@@ -145,10 +145,6 @@ async def handle_message(
     conv.messages.append({"role": "user", "content": user_text})
     logger.info("Sending to Claude: %d messages, container=%s", len(conv.messages), conv.container_id)
 
-    # Send status message while processing
-    status_msg_id = await _send_status(telegram_token, chat_id, message.message_id,
-                                        "Trabajando...")
-
     # Build document numbering context
     year = datetime.now().year
     last_numbers = store.get_last_document_numbers(year)
@@ -167,7 +163,6 @@ async def handle_message(
                                      system_extra=doc_number_context)
     except Exception:
         logger.exception("Claude API error for chat=%s root=%s", chat_id, root_id)
-        await _delete_message(telegram_token, chat_id, status_msg_id)
         await _send_text(telegram_token, chat_id, message.message_id,
                          "Error generando el documento. Intenta de nuevo.")
         conv.messages.pop()  # remove failed user message
@@ -179,9 +174,6 @@ async def handle_message(
     store.save(chat_id, root_id, conv)
     logger.info("Claude response: text_len=%d files=%d container=%s text=%r",
                 len(result.text), len(result.file_ids), result.container_id, result.text[:120])
-
-    # Delete status message, then send text followed by files
-    await _delete_message(telegram_token, chat_id, status_msg_id)
 
     if result.text:
         bot_msg_id = await _send_text(telegram_token, chat_id, message.message_id, result.text)
