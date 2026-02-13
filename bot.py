@@ -1,9 +1,26 @@
 import logging
+from datetime import datetime
+
 import httpx
 from claude_client import ClaudeClient, ClaudeResponse
-from conversations import ConversationStore
+from conversations import ConversationStore, DOC_TYPES
 
 logger = logging.getLogger(__name__)
+
+
+_DOC_TYPE_KEYWORDS = {
+    "COT": ["cotizaci", "cotización"],
+    "PRES": ["presupuest"],
+    "REC": ["recibo"],
+}
+
+
+def _infer_doc_type(text: str) -> str | None:
+    text_lower = text.lower()
+    for doc_type, keywords in _DOC_TYPE_KEYWORDS.items():
+        if any(kw in text_lower for kw in keywords):
+            return doc_type
+    return None
 
 
 def is_bot_mentioned(message, bot_user_id: int, bot_username: str = "") -> bool:
@@ -102,8 +119,22 @@ async def handle_message(
     status_msg_id = await _send_status(telegram_token, chat_id, message.message_id,
                                         "Trabajando...")
 
+    # Build document numbering context
+    year = datetime.now().year
+    last_numbers = store.get_last_document_numbers(year)
+    if last_numbers:
+        lines = [f"\n\n## Numeración de documentos\nÚltimos números generados en {year}:"]
+        for doc_type, num in sorted(last_numbers.items()):
+            label = DOC_TYPES.get(doc_type, doc_type)
+            lines.append(f"- {label}: {num}")
+        lines.append("Usa el siguiente número consecutivo al generar un nuevo documento. Ejemplo: si el último fue COT-2026-003, el próximo es COT-2026-004.")
+        doc_number_context = "\n".join(lines)
+    else:
+        doc_number_context = f"\n\n## Numeración de documentos\nNo hay documentos generados en {year}. Empieza desde 001. Formato: TIPO-{year}-001 (COT para cotización, PRES para presupuesto, REC para recibo)."
+
     try:
-        result = claude.send_message(conv.messages, container_id=conv.container_id)
+        result = claude.send_message(conv.messages, container_id=conv.container_id,
+                                     system_extra=doc_number_context)
     except Exception:
         logger.exception("Claude API error for chat=%s root=%s", chat_id, root_id)
         await _delete_message(telegram_token, chat_id, status_msg_id)
@@ -127,6 +158,13 @@ async def handle_message(
         logger.info("Text sent: bot_msg_id=%s -> root=%s", bot_msg_id, root_id)
         if bot_msg_id:
             store.register_message(chat_id, bot_msg_id, root_id)
+
+    # Increment document counter if files were generated
+    if result.file_ids:
+        doc_type = _infer_doc_type(result.text)
+        if doc_type:
+            doc_num = store.next_document_number(doc_type, year)
+            logger.info("Document counter incremented: %s", doc_num)
 
     async with httpx.AsyncClient() as http:
         for file_id in result.file_ids:

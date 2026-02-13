@@ -84,19 +84,22 @@ class ClaudeClient:
     def needs_continuation(self, response) -> bool:
         return response.stop_reason == "pause_turn"
 
-    def send_message(self, messages: list[dict], container_id: str | None = None) -> ClaudeResponse:
+    def send_message(self, messages: list[dict], container_id: str | None = None,
+                     system_extra: str = "") -> ClaudeResponse:
         container = {
             "skills": [{"type": "custom", "skill_id": self._skill_id, "version": "latest"}]
         }
         if container_id:
             container["id"] = container_id
 
+        system = SYSTEM_PROMPT + system_extra if system_extra else SYSTEM_PROMPT
+
         logger.info("Claude API call: %d messages, container=%s", len(messages), container_id)
         response = self._client.beta.messages.create(
             model="claude-sonnet-4-5-20250929",
             max_tokens=4096,
             betas=BETAS,
-            system=SYSTEM_PROMPT,
+            system=system,
             container=container,
             messages=messages,
             tools=[{"type": "code_execution_20250825", "name": "code_execution"}],
@@ -115,7 +118,7 @@ class ClaudeClient:
                 model="claude-sonnet-4-5-20250929",
                 max_tokens=4096,
                 betas=BETAS,
-                system=SYSTEM_PROMPT,
+                system=system,
                 container={"id": response.container.id, **container},
                 messages=messages,
                 tools=[{"type": "code_execution_20250825", "name": "code_execution"}],

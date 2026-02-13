@@ -26,7 +26,16 @@ CREATE TABLE IF NOT EXISTS message_registry (
 
 CREATE INDEX IF NOT EXISTS idx_message_registry_root
     ON message_registry (chat_id, root_message_id);
+
+CREATE TABLE IF NOT EXISTS document_counters (
+    doc_type TEXT NOT NULL,
+    year INT NOT NULL,
+    last_number INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (doc_type, year)
+);
 """
+
+DOC_TYPES = {"COT": "Cotización", "PRES": "Presupuesto", "REC": "Recibo"}
 
 
 def _json_default(obj: Any) -> Any:
@@ -122,3 +131,24 @@ class ConversationStore:
         with self._pool.connection() as conn:
             row = conn.execute("SELECT COUNT(*) FROM message_registry").fetchone()
         return row[0]
+
+    def next_document_number(self, doc_type: str, year: int) -> str:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                """
+                INSERT INTO document_counters (doc_type, year, last_number)
+                VALUES (%s, %s, 1)
+                ON CONFLICT (doc_type, year) DO UPDATE SET last_number = document_counters.last_number + 1
+                RETURNING last_number
+                """,
+                (doc_type, year),
+            ).fetchone()
+        return f"{doc_type}-{year}-{row[0]:03d}"
+
+    def get_last_document_numbers(self, year: int) -> dict[str, str]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT doc_type, last_number FROM document_counters WHERE year = %s",
+                (year,),
+            ).fetchall()
+        return {row[0]: f"{row[0]}-{year}-{row[1]:03d}" for row in rows}
