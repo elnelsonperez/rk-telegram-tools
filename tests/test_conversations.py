@@ -1,4 +1,5 @@
 import os
+import time
 import pytest
 from conversations import ConversationStore
 
@@ -8,14 +9,19 @@ TEST_DB_URL = os.environ.get(
 )
 
 
+def _exec(store, sql, params=None):
+    with store._pool.connection() as conn:
+        return conn.execute(sql, params).fetchone()
+
+
 @pytest.fixture
 def store():
     s = ConversationStore(database_url=TEST_DB_URL, ttl_seconds=86400)
-    # Clean tables before each test
-    s._conn.execute("DELETE FROM message_registry")
-    s._conn.execute("DELETE FROM conversations")
+    with s._pool.connection() as conn:
+        conn.execute("DELETE FROM message_registry")
+        conn.execute("DELETE FROM conversations")
     yield s
-    s._conn.close()
+    s._pool.close()
 
 
 def test_new_mention_creates_conversation(store):
@@ -47,8 +53,7 @@ def test_cleanup_removes_expired_conversations(store):
     conv = store.get_or_create(chat_id=1, root_message_id=100)
     conv.messages.append({"role": "user", "content": "test"})
     store.save(1, 100, conv)
-    # Force last_activity into the past
-    store._conn.execute(
+    _exec(store,
         "UPDATE conversations SET last_activity = NOW() - interval '2 seconds' WHERE chat_id = 1 AND root_message_id = 100"
     )
 
@@ -59,16 +64,15 @@ def test_cleanup_removes_expired_conversations(store):
 
 def test_get_or_create_updates_last_activity(store):
     store.get_or_create(chat_id=1, root_message_id=100)
-    row1 = store._conn.execute(
+    row1 = _exec(store,
         "SELECT last_activity FROM conversations WHERE chat_id = 1 AND root_message_id = 100"
-    ).fetchone()
+    )
 
-    import time
     time.sleep(0.01)
     store.get_or_create(chat_id=1, root_message_id=100)
-    row2 = store._conn.execute(
+    row2 = _exec(store,
         "SELECT last_activity FROM conversations WHERE chat_id = 1 AND root_message_id = 100"
-    ).fetchone()
+    )
     assert row2[0] >= row1[0]
 
 
@@ -93,7 +97,7 @@ def test_cleanup_removes_message_mappings(store):
     store.get_or_create(chat_id=1, root_message_id=100)
     store.register_message(chat_id=1, message_id=100, root_message_id=100)
     store.register_message(chat_id=1, message_id=101, root_message_id=100)
-    store._conn.execute(
+    _exec(store,
         "UPDATE conversations SET last_activity = NOW() - interval '2 seconds' WHERE chat_id = 1 AND root_message_id = 100"
     )
 
