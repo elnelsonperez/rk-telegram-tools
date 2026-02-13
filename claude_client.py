@@ -96,7 +96,7 @@ class ClaudeClient:
 
         logger.info("Claude API call: %d messages, container=%s", len(messages), container_id)
         response = self._client.beta.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model="claude-haiku-4-5-20251001",
             max_tokens=4096,
             betas=BETAS,
             system=system,
@@ -115,7 +115,7 @@ class ClaudeClient:
             logger.info("Claude pause_turn, continuing (%d/%d)", continuation, MAX_CONTINUATIONS)
             messages = messages + [{"role": "assistant", "content": response.content}]
             response = self._client.beta.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=4096,
                 betas=BETAS,
                 system=system,
