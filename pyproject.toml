@@ -9,6 +9,7 @@ dependencies = [
     "python-telegram-bot>=22.6",
     "starlette>=0.52.1",
     "uvicorn>=0.40.0",
+    "psycopg[binary]>=3.2.0",
 ]
 
 [dependency-groups]

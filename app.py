@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 config = load_config()
 claude = ClaudeClient(api_key=config.anthropic_api_key, skill_id=config.rk_skill_id)
-store = ConversationStore()
+store = ConversationStore(database_url=config.database_url)
 
 # We need the bot's user ID and username to detect mentions/replies.
 # Fetched once on first webhook via getMe.

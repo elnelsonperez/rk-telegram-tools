@@ -5,7 +5,38 @@ from bot import (
     find_root_message_id, handle_message, _send_status, _delete_message,
 )
 from claude_client import ClaudeResponse
-from conversations import ConversationStore
+from conversations import Conversation
+
+
+def _mock_store():
+    """Create a mock ConversationStore backed by in-memory dicts."""
+    store = MagicMock()
+    _convs = {}
+    _registry = {}
+
+    def get_or_create(chat_id, root_message_id):
+        key = (chat_id, root_message_id)
+        if key not in _convs:
+            _convs[key] = Conversation()
+        return _convs[key]
+
+    def register_message(chat_id, message_id, root_message_id):
+        _registry[(chat_id, message_id)] = root_message_id
+
+    def find_root(chat_id, message_id):
+        return _registry.get((chat_id, message_id))
+
+    def registry_size():
+        return len(_registry)
+
+    store.get_or_create = MagicMock(side_effect=get_or_create)
+    store.register_message = MagicMock(side_effect=register_message)
+    store.find_root = MagicMock(side_effect=find_root)
+    store.save = MagicMock()
+    store.registry_size = MagicMock(side_effect=registry_size)
+    store._convs = _convs
+    store._registry = _registry
+    return store
 
 
 def _make_message(text="", entities=None, reply_to=None, message_id=1):
@@ -192,7 +223,7 @@ async def test_handle_message_sends_status_then_text_then_file():
     )
     claude.download_file.return_value = ("cotizacion.pdf", b"pdf-bytes")
 
-    store = ConversationStore()
+    store = _mock_store()
 
     calls = []
 
@@ -242,7 +273,7 @@ async def test_handle_message_deletes_status_on_error():
     claude = MagicMock()
     claude.send_message.side_effect = RuntimeError("API down")
 
-    store = ConversationStore()
+    store = _mock_store()
 
     calls = []
 
@@ -275,7 +306,7 @@ async def test_handle_message_deletes_status_on_error():
 @pytest.mark.asyncio
 async def test_handle_message_reply_continues_conversation():
     """Replying to a bot message should continue the same conversation via registry."""
-    store = ConversationStore()
+    store = _mock_store()
 
     # Step 1: User @mentions bot (new conversation)
     entity = _make_entity("mention", offset=0, length=14, user=None)

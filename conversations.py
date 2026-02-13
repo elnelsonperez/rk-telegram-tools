@@ -1,48 +1,105 @@
+import json
 import logging
-import time
 from dataclasses import dataclass, field
 
+import psycopg
+
 logger = logging.getLogger(__name__)
+
+_CREATE_TABLES = """
+CREATE TABLE IF NOT EXISTS conversations (
+    chat_id BIGINT NOT NULL,
+    root_message_id BIGINT NOT NULL,
+    container_id TEXT,
+    messages JSONB NOT NULL DEFAULT '[]',
+    last_activity TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (chat_id, root_message_id)
+);
+
+CREATE TABLE IF NOT EXISTS message_registry (
+    chat_id BIGINT NOT NULL,
+    message_id BIGINT NOT NULL,
+    root_message_id BIGINT NOT NULL,
+    PRIMARY KEY (chat_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_registry_root
+    ON message_registry (chat_id, root_message_id);
+"""
 
 
 @dataclass
 class Conversation:
     messages: list = field(default_factory=list)
     container_id: str | None = None
-    last_activity: float = field(default_factory=time.time)
 
 
 class ConversationStore:
-    def __init__(self, ttl_seconds: int = 86400):
-        self._store: dict[tuple[int, int], Conversation] = {}
-        self._message_to_root: dict[tuple[int, int], int] = {}  # (chat_id, msg_id) → root_id
+    def __init__(self, database_url: str, ttl_seconds: int = 86400):
+        self._conninfo = database_url
         self._ttl = ttl_seconds
+        self._conn = psycopg.connect(self._conninfo, autocommit=True)
+        self._conn.execute(_CREATE_TABLES)
+        logger.info("ConversationStore: tables ensured")
 
     def get_or_create(self, chat_id: int, root_message_id: int) -> Conversation:
-        key = (chat_id, root_message_id)
-        if key not in self._store:
-            self._store[key] = Conversation()
-        self._store[key].last_activity = time.time()
-        return self._store[key]
+        row = self._conn.execute(
+            """
+            INSERT INTO conversations (chat_id, root_message_id, messages, last_activity)
+            VALUES (%s, %s, '[]'::jsonb, NOW())
+            ON CONFLICT (chat_id, root_message_id) DO UPDATE SET last_activity = NOW()
+            RETURNING messages, container_id
+            """,
+            (chat_id, root_message_id),
+        ).fetchone()
+        messages = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+        return Conversation(messages=messages, container_id=row[1])
+
+    def save(self, chat_id: int, root_message_id: int, conv: Conversation):
+        self._conn.execute(
+            """
+            UPDATE conversations
+            SET messages = %s::jsonb, container_id = %s, last_activity = NOW()
+            WHERE chat_id = %s AND root_message_id = %s
+            """,
+            (json.dumps(conv.messages), conv.container_id, chat_id, root_message_id),
+        )
 
     def register_message(self, chat_id: int, message_id: int, root_message_id: int):
-        """Map a message_id to its conversation root so replies can find the conversation."""
-        self._message_to_root[(chat_id, message_id)] = root_message_id
+        self._conn.execute(
+            """
+            INSERT INTO message_registry (chat_id, message_id, root_message_id)
+            VALUES (%s, %s, %s)
+            ON CONFLICT DO NOTHING
+            """,
+            (chat_id, message_id, root_message_id),
+        )
 
     def find_root(self, chat_id: int, message_id: int) -> int | None:
-        """Look up the root_message_id for a given message_id, or None if unknown."""
-        return self._message_to_root.get((chat_id, message_id))
+        row = self._conn.execute(
+            "SELECT root_message_id FROM message_registry WHERE chat_id = %s AND message_id = %s",
+            (chat_id, message_id),
+        ).fetchone()
+        return row[0] if row else None
 
     def cleanup(self):
-        now = time.time()
-        expired = [k for k, v in self._store.items() if now - v.last_activity > self._ttl]
-        expired_keys = set(expired)
-        for k in expired:
-            del self._store[k]
-        # Clean up message mappings for expired conversations
-        expired_msgs = [k for k, root in self._message_to_root.items()
-                        if (k[0], root) in expired_keys]
-        for k in expired_msgs:
-            del self._message_to_root[k]
-        if expired:
-            logger.info("Cleaned up %d expired conversations, %d remaining", len(expired), len(self._store))
+        result = self._conn.execute(
+            """
+            WITH expired AS (
+                DELETE FROM conversations
+                WHERE last_activity < NOW() - make_interval(secs => %s)
+                RETURNING chat_id, root_message_id
+            )
+            DELETE FROM message_registry
+            USING expired
+            WHERE message_registry.chat_id = expired.chat_id
+              AND message_registry.root_message_id = expired.root_message_id
+            """,
+            (self._ttl,),
+        )
+        if result.rowcount:
+            logger.info("Cleaned up expired conversations/registry entries")
+
+    def registry_size(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM message_registry").fetchone()
+        return row[0]

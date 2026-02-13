@@ -92,7 +92,7 @@ async def handle_message(
     # Register user's message so future replies to it can find this conversation
     store.register_message(chat_id, message.message_id, root_id)
     logger.info("Registered msg %s -> root %s (registry size: %d)",
-                message.message_id, root_id, len(store._message_to_root))
+                message.message_id, root_id, store.registry_size())
 
     conv = store.get_or_create(chat_id=chat_id, root_message_id=root_id)
     conv.messages.append({"role": "user", "content": user_text})
@@ -110,10 +110,12 @@ async def handle_message(
         await _send_text(telegram_token, chat_id, message.message_id,
                          "Error generando el documento. Intenta de nuevo.")
         conv.messages.pop()  # remove failed user message
+        store.save(chat_id, root_id, conv)
         return
 
     conv.container_id = result.container_id
     conv.messages.append({"role": "assistant", "content": result.raw_content})
+    store.save(chat_id, root_id, conv)
     logger.info("Claude response: text_len=%d files=%d container=%s text=%r",
                 len(result.text), len(result.file_ids), result.container_id, result.text[:120])
 
