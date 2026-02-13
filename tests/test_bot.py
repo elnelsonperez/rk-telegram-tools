@@ -347,6 +347,7 @@ async def test_handle_message_reply_continues_conversation():
     bot_reply.message_id = 201
     bot_reply.from_user = MagicMock(id=123)  # bot's user id
     bot_reply.reply_to_message = None  # Telegram truncates nesting
+    bot_reply.voice = None
 
     msg2 = _make_message(text="quita los itbis", message_id=300)
     msg2.chat = MagicMock(id=1)

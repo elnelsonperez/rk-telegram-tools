@@ -102,11 +102,16 @@ async def handle_message(
                              "Para que pueda escuchar tu nota de voz, responde directamente a uno de mis mensajes.")
         return
 
+    # Check if this text message is replying to a voice note
+    reply_has_voice = (not is_voice and message.reply_to_message
+                       and hasattr(message.reply_to_message, 'voice')
+                       and message.reply_to_message.voice is not None)
+
     if is_voice:
         user_text = None  # will be transcribed below
     else:
         user_text = extract_user_text(message, bot_user_id, bot_username)
-        if not user_text:
+        if not user_text and not reply_has_voice:
             logger.debug("Message matched but extracted text is empty, ignoring")
             return
 
@@ -130,25 +135,37 @@ async def handle_message(
     logger.info("Registered msg %s -> root %s (registry size: %d)",
                 message.message_id, root_id, store.registry_size())
 
-    # Transcribe voice messages
+    # Transcribe voice (either the message itself or the replied-to message)
+    voice_file_id = None
     if is_voice:
+        voice_file_id = message.voice.file_id
+    elif reply_has_voice:
+        voice_file_id = message.reply_to_message.voice.file_id
+
+    if voice_file_id:
         status_msg_id = await _send_status(telegram_token, chat_id, message.message_id,
                                             "Transcribiendo audio...")
         try:
-            user_text = transcriber.transcribe_voice(telegram_token, message.voice.file_id)
+            transcript = transcriber.transcribe_voice(telegram_token, voice_file_id)
         except Exception:
             logger.exception("Transcription failed for chat=%s", chat_id)
             await _delete_message(telegram_token, chat_id, status_msg_id)
             await _send_text(telegram_token, chat_id, message.message_id,
                              "No pude transcribir el audio. Intenta de nuevo.")
             return
-        if not user_text:
+        if not transcript:
             await _delete_message(telegram_token, chat_id, status_msg_id)
             await _send_text(telegram_token, chat_id, message.message_id,
                              "No pude entender el audio. Intenta de nuevo o escribe tu mensaje.")
             return
-        logger.info("Transcribed voice: %r", user_text[:120])
+        logger.info("Transcribed voice: %r", transcript[:120])
         await _delete_message(telegram_token, chat_id, status_msg_id)
+
+        if is_voice:
+            user_text = transcript
+        else:
+            # Text reply to a voice note — combine both
+            user_text = f"[Nota de voz transcrita]: {transcript}\n\n{user_text or ''}".strip()
 
     conv = store.get_or_create(chat_id=chat_id, root_message_id=root_id)
     conv.messages.append({"role": "user", "content": user_text})
