@@ -9,6 +9,7 @@ from telegram import Update
 from config import load_config
 from claude_client import ClaudeClient
 from conversations import ConversationStore
+from transcriber import Transcriber
 from bot import handle_message
 
 logging.basicConfig(level=logging.INFO)
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 config = load_config()
 claude = ClaudeClient(api_key=config.anthropic_api_key, skill_id=config.rk_skill_id)
 store = ConversationStore(database_url=config.database_url)
+transcriber = Transcriber(soniox_api_key=config.soniox_api_key)
 
 # We need the bot's user ID and username to detect mentions/replies.
 # Fetched once on first webhook via getMe.
@@ -36,7 +38,8 @@ async def webhook(request: Request) -> JSONResponse:
     body = await request.json()
     update = Update.de_json(body, bot=None)
 
-    if update and update.message and update.message.text:
+    has_content = update and update.message and (update.message.text or update.message.voice)
+    if has_content:
         global _bot_user_id, _bot_username
         if _bot_user_id is None:
             import httpx
@@ -51,8 +54,9 @@ async def webhook(request: Request) -> JSONResponse:
 
         user = update.message.from_user
         user_name = f"{user.first_name} ({user.id})" if user else "unknown"
+        msg_preview = (update.message.text or "[voice]")[:80]
         logger.info("Webhook received: chat=%s user=%s text=%r",
-                     update.message.chat.id, user_name, update.message.text[:80])
+                     update.message.chat.id, user_name, msg_preview)
 
         asyncio.create_task(
             handle_message(
@@ -61,6 +65,7 @@ async def webhook(request: Request) -> JSONResponse:
                 bot_username=_bot_username,
                 claude=claude,
                 store=store,
+                transcriber=transcriber,
                 telegram_token=config.telegram_bot_token,
             )
         )

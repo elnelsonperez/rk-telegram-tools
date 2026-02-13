@@ -45,6 +45,7 @@ def _make_message(text="", entities=None, reply_to=None, message_id=1):
     msg.message_id = message_id
     msg.entities = entities or []
     msg.reply_to_message = reply_to
+    msg.voice = None
     return msg
 
 
@@ -248,7 +249,7 @@ async def test_handle_message_sends_status_then_text_then_file():
          patch("bot._send_document", mock_send_document):
         await handle_message(
             message=msg, bot_user_id=123, bot_username="rkartside_bot",
-            claude=claude, store=store, telegram_token="tok",
+            claude=claude, store=store, transcriber=MagicMock(), telegram_token="tok",
         )
 
     assert calls == [
@@ -293,7 +294,7 @@ async def test_handle_message_deletes_status_on_error():
          patch("bot._send_text", mock_send_text):
         await handle_message(
             message=msg, bot_user_id=123, bot_username="rkartside_bot",
-            claude=claude, store=store, telegram_token="tok",
+            claude=claude, store=store, transcriber=MagicMock(), telegram_token="tok",
         )
 
     assert calls == [
@@ -338,7 +339,7 @@ async def test_handle_message_reply_continues_conversation():
          patch("bot._send_document", mock_send_document):
         await handle_message(
             message=msg1, bot_user_id=123, bot_username="rkartside_bot",
-            claude=claude, store=store, telegram_token="tok",
+            claude=claude, store=store, transcriber=MagicMock(), telegram_token="tok",
         )
 
     # Verify first conversation has 2 messages (user + assistant)
@@ -367,7 +368,7 @@ async def test_handle_message_reply_continues_conversation():
          patch("bot._send_document", mock_send_document):
         await handle_message(
             message=msg2, bot_user_id=123, bot_username="rkartside_bot",
-            claude=claude, store=store, telegram_token="tok",
+            claude=claude, store=store, transcriber=MagicMock(), telegram_token="tok",
         )
 
     # Should have 4 messages now (2 from first turn + 2 from second turn)

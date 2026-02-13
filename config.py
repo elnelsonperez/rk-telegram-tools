@@ -9,9 +9,10 @@ class Config:
     rk_skill_id: str
     webhook_secret: str
     database_url: str
+    soniox_api_key: str
 
 
-_REQUIRED = ["TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "RK_SKILL_ID", "WEBHOOK_SECRET"]
+_REQUIRED = ["TELEGRAM_BOT_TOKEN", "ANTHROPIC_API_KEY", "RK_SKILL_ID", "WEBHOOK_SECRET", "SONIOX_API_KEY"]
 _DB_VARS = ["DATABASE_HOST", "DATABASE_USER", "DATABASE_PASSWORD", "DATABASE_NAME"]
 
 
@@ -36,4 +37,5 @@ def load_config() -> Config:
         rk_skill_id=os.environ["RK_SKILL_ID"],
         webhook_secret=os.environ["WEBHOOK_SECRET"],
         database_url=database_url,
+        soniox_api_key=os.environ["SONIOX_API_KEY"],
     )

@@ -4,6 +4,7 @@ from datetime import datetime
 import httpx
 from claude_client import ClaudeClient, ClaudeResponse
 from conversations import ConversationStore, DOC_TYPES
+from transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
 
@@ -75,41 +76,70 @@ async def handle_message(
     bot_username: str,
     claude: ClaudeClient,
     store: ConversationStore,
+    transcriber: Transcriber,
     telegram_token: str,
 ):
-    mentioned = is_bot_mentioned(message, bot_user_id, bot_username)
+    is_voice = message.voice is not None
+    mentioned = is_bot_mentioned(message, bot_user_id, bot_username) if not is_voice else False
     replied = is_reply_to_bot(message, bot_user_id)
 
-    if not mentioned and not replied:
+    # Voice messages sent as replies to the bot are always handled
+    if not is_voice and not mentioned and not replied:
         return
 
-    user_text = extract_user_text(message, bot_user_id, bot_username)
-    if not user_text:
-        logger.debug("Message matched but extracted text is empty, ignoring")
+    # For voice messages, only handle if it's a reply to the bot
+    if is_voice and not replied:
         return
+
+    if is_voice:
+        user_text = None  # will be transcribed below
+    else:
+        user_text = extract_user_text(message, bot_user_id, bot_username)
+        if not user_text:
+            logger.debug("Message matched but extracted text is empty, ignoring")
+            return
 
     chat_id = message.chat.id
 
     if mentioned and not message.reply_to_message:
         root_id = message.message_id  # new conversation
-        logger.info("New conversation: chat=%s msg_id=%s root=%s text=%r",
-                     chat_id, message.message_id, root_id, user_text[:80])
+        logger.info("New conversation: chat=%s msg_id=%s root=%s",
+                     chat_id, message.message_id, root_id)
     else:
         # Look up root from registry (Telegram only nests reply_to_message 1 level deep)
         replied_to_id = message.reply_to_message.message_id
         root_id = store.find_root(chat_id, replied_to_id)
         if root_id is None:
-            # Fallback: use replied-to message as root (e.g., after bot restart)
             root_id = replied_to_id
             logger.warning("Root not in registry: chat=%s replied_to=%s, falling back to root=%s",
                            chat_id, replied_to_id, root_id)
-        logger.info("Continue conversation: chat=%s msg_id=%s root=%s replied_to=%s text=%r",
-                     chat_id, message.message_id, root_id, replied_to_id, user_text[:80])
+        logger.info("Continue conversation: chat=%s msg_id=%s root=%s replied_to=%s",
+                     chat_id, message.message_id, root_id, replied_to_id)
 
     # Register user's message so future replies to it can find this conversation
     store.register_message(chat_id, message.message_id, root_id)
     logger.info("Registered msg %s -> root %s (registry size: %d)",
                 message.message_id, root_id, store.registry_size())
+
+    # Transcribe voice messages
+    if is_voice:
+        status_msg_id = await _send_status(telegram_token, chat_id, message.message_id,
+                                            "Transcribiendo audio...")
+        try:
+            user_text = transcriber.transcribe_voice(telegram_token, message.voice.file_id)
+        except Exception:
+            logger.exception("Transcription failed for chat=%s", chat_id)
+            await _delete_message(telegram_token, chat_id, status_msg_id)
+            await _send_text(telegram_token, chat_id, message.message_id,
+                             "No pude transcribir el audio. Intenta de nuevo.")
+            return
+        if not user_text:
+            await _delete_message(telegram_token, chat_id, status_msg_id)
+            await _send_text(telegram_token, chat_id, message.message_id,
+                             "No pude entender el audio. Intenta de nuevo o escribe tu mensaje.")
+            return
+        logger.info("Transcribed voice: %r", user_text[:120])
+        await _delete_message(telegram_token, chat_id, status_msg_id)
 
     conv = store.get_or_create(chat_id=chat_id, root_message_id=root_id)
     conv.messages.append({"role": "user", "content": user_text})
