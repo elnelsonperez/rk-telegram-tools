@@ -327,7 +327,7 @@ class RKDocument:
         )
 
         available_width = self.width - 100
-        margin_bottom = max(y_end, 60)
+        margin_bottom = y_end
         current_y = y_start
 
         for para_text in paragraphs:
@@ -395,7 +395,7 @@ class RKDocument:
                 
                 "Pago y Financiamiento": "Para dar inicio al proceso de diseño, se requiere un avance del 50% del monto total y la firma de este documento. El 50% restante se abonará contra entrega, al momento de presentar el documento final. Este pago corresponde exclusivamente a la propuesta digital de diseño y distribución y <b>no es reembolsable</b>.<br/><br/>La cotización para la ejecución del proyecto, así como el acompañamiento en obra, se presentará por separado una vez aprobada la propuesta.<br/><br/>La propuesta digital presentada está sujeta a un cambio sin costo. En caso de que requiera otros cambios, estos tendrán un costo adicional.",
                 
-                "Propiedad Intelectual": "Los diseños, planos y propuestas digitales presentados son propiedad intelectual de RK ArtSide SRL. El cliente adquiere el derecho de uso exclusivamente para la ejecución del proyecto acordado. Queda prohibida su reproducción, distribución o uso para otros fines sin autorización escrita de RK ArtSide SRL.",
+                "Propiedad Intelectual": f"La información contenida en este documento es propiedad única de RK ArtSide y Reyka Kawashiro y {client_name}. Cualquier reproducción en partes o en su totalidad se prohíbe sin el permiso de RK ArtSide, Reyka Kawashiro y {client_name}.",
             }
         
         # Build all content paragraphs
@@ -409,40 +409,32 @@ class RKDocument:
             section_para = f"<b><font color='#9A8455'>{title}:</font></b><br/>{content}"
             all_paragraphs.append(section_para)
         
-        # Calculate space needed for closing and signature
-        # Closing: 4 lines * 14px = 56px
-        # Gap: 20px
-        # Signature area: 30px (line + labels)
-        # Stamp: 80px height
-        # Bottom margin: 50px
-        # Total needed at bottom: ~220px
-        min_space_needed = 220
-        
-        # Draw paragraphs with calculated space
-        content_end_y = self.draw_paragraph_block(all_paragraphs, self.y_pos, min_space_needed)
-
         # Default closing paragraphs
         if closing_paragraphs is None:
             closing_paragraphs = [
-                "Agradecemos la oportunidad de trabajar con usted en este emocionante proyecto.",
-                "Nuestro equipo está ansioso por transformar sus ideas en realidad.",
+                "Agradecemos la oportunidad de trabajar con usted en este emocionante proyecto. Nuestro equipo está ansioso por transformar sus ideas en realidad.",
                 "",
                 "Quedamos a su entera disposición para cualquier consulta o aclaración adicional."
             ]
+        
+        # Add closing paragraphs to the main content block
+        # Add a bit of spacing before closing
+        all_paragraphs.append("<br/>")  # Empty line for spacing
+        all_paragraphs.extend(closing_paragraphs)
+        
+        # Calculate space needed for signature and stamp only
+        # Signature area: 40px (line + labels + gap)
+        # Stamp: 80px height
+        # Bottom margin: 50px
+        # Total needed at bottom: ~170px
+        min_space_needed = 170
+        
+        # Draw all paragraphs (content + closing) with calculated space
+        content_end_y = self.draw_paragraph_block(all_paragraphs, self.y_pos, min_space_needed)
 
-        # Draw closing dynamically below content
-        self.y_pos = content_end_y - 20
-        self.c.setFont("Helvetica", 10)
-        self.c.setFillColor(DARK)
-
-        for line in closing_paragraphs:
-            self.check_page_break(needed_height=30)
-            self.y_pos -= 14
-            self.c.drawString(50, self.y_pos, line)
-
-        # Signature area below closing (needs less space now with 80px stamp)
+        # Signature area below content (closing is now part of paragraphs)
         self.check_page_break(needed_height=120)
-        sig_y = self.y_pos - 30
+        sig_y = content_end_y - 40
 
         # Client signature line
         self.c.setStrokeColor(LIGHT_GOLD)
