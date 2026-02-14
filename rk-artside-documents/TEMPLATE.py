@@ -4,7 +4,7 @@ RK ArtSide Document Generator Template
 Use this template to generate professional PDFs for RK ArtSide SRL.
 """
 
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import legal
 from reportlab.lib.colors import HexColor
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -14,7 +14,7 @@ from reportlab.lib.enums import TA_JUSTIFY
 from datetime import datetime
 
 # Brand Colors
-GOLD = HexColor('#9A8455')x
+GOLD = HexColor('#9A8455')
 CREAM = HexColor('#FFF6ED')
 DARK = HexColor('#333333')
 LIGHT_GOLD = HexColor('#C4B896')
@@ -29,8 +29,8 @@ class RKDocument:
     """Base class for RK ArtSide documents."""
     
     def __init__(self, filename, doc_title, doc_number, date=None, subtitle=None):
-        self.c = canvas.Canvas(filename, pagesize=letter)
-        self.width, self.height = letter
+        self.c = canvas.Canvas(filename, pagesize=legal)
+        self.width, self.height = legal
         self.doc_title = doc_title
         self.doc_number = doc_number
         self.date = date or datetime.now().strftime("%d/%m/%Y")
@@ -273,14 +273,38 @@ class RKDocument:
             
         self.y_pos -= 10
         
-    def draw_stamp(self):
-        """Draw company stamp at bottom."""
+    def check_page_break(self, needed_height=100):
+        """Check if we need a new page, and if so start one.
+
+        Args:
+            needed_height: How much vertical space is needed (in points)
+
+        Returns:
+            True if a new page was started
+        """
+        margin_bottom = 60
+        if self.y_pos - needed_height < margin_bottom:
+            self.c.showPage()
+            self.y_pos = self.height - 50
+            return True
+        return False
+
+    def draw_stamp(self, y=None, size=120):
+        """Draw company stamp.
+
+        Args:
+            y: Y position for stamp. If None, uses current y_pos.
+            size: Size of stamp in pixels (default 120, use 80 for commitment letters)
+        """
         stamp = ImageReader(STAMP_PATH)
-        self.c.drawImage(stamp, self.width - 200, 80, width=120, height=120,
+        stamp_y = y if y is not None else self.y_pos - size
+        # Position further to the right for smaller stamps
+        x_offset = 200 if size >= 100 else 150
+        self.c.drawImage(stamp, self.width - x_offset, stamp_y, width=size, height=size,
                         preserveAspectRatio=True, mask='auto')
     
     def draw_paragraph_block(self, paragraphs, y_start, y_end):
-        """Draw formatted paragraphs with automatic text wrapping.
+        """Draw formatted paragraphs with automatic text wrapping and multi-page support.
 
         Args:
             paragraphs: List of paragraph text (can include HTML markup)
@@ -303,25 +327,27 @@ class RKDocument:
         )
 
         available_width = self.width - 100
+        margin_bottom = max(y_end, 60)
+        current_y = y_start
 
-        # Build story and calculate total height
-        story = []
-        total_height = 0
         for para_text in paragraphs:
             p = Paragraph(para_text, body_style)
             w, h = p.wrap(available_width, 10000)
-            total_height += h + body_style.spaceAfter
-            story.append(p)
+            needed = h + body_style.spaceAfter
 
-        # Create a frame for the paragraphs
-        frame = Frame(50, y_start - total_height, available_width, total_height,
-                      leftPadding=0, bottomPadding=0, rightPadding=0, topPadding=0)
+            # Check if paragraph fits on current page
+            if current_y - needed < margin_bottom:
+                # Start new page
+                self.c.showPage()
+                current_y = self.height - 50
 
-        # Add to frame
-        frame.addFromList(story, self.c)
+            # Draw paragraph
+            frame = Frame(50, current_y - h, available_width, h,
+                          leftPadding=0, bottomPadding=0, rightPadding=0, topPadding=0)
+            frame.addFromList([p], self.c)
+            current_y -= needed
 
-        # Return actual final position
-        return y_start - total_height
+        return current_y
     
     def draw_carta_compromiso(
         self,
@@ -365,11 +391,11 @@ class RKDocument:
             sections = {
                 "Visita y Propuesta Digital": f"Entendemos que cada cliente tiene necesidades y expectativas específicas. Por lo tanto, antes de iniciar el proyecto, realizaremos una visita y crearemos una propuesta digital detallada que se ajuste a sus requerimientos y gustos. Para cubrir los costos de esta fase inicial, se cobrará una tarifa de <b>RD${visit_fee:,.2f}</b> que incluye visita, propuesta digital y presupuesto presentado.",
                 
-                "Plazo de Entrega": f"Una vez que la propuesta sea aprobada por su parte, nos comprometemos a comenzar el proyecto de inmediato. Un plazo máximo de <b>{delivery_days} días</b> a partir de la aprobación o depósito recibirá propuesta de: {project_description}. Una vez entregada la propuesta digital y aprobada se presenta cotización de mobiliarios y ejecución.",
+                "Plazo de Entrega": f"Una vez que la propuesta sea aprobada por su parte, nos comprometemos a comenzar el proyecto de inmediato. Un plazo máximo de <b>{delivery_days} días</b> a partir de la aprobación o depósito recibirá propuesta de: <b>{project_description}</b>. Una vez entregada la propuesta digital y aprobada se presenta cotización de mobiliarios y ejecución.",
                 
-                "Pago y Financiamiento": "Este monto no es reembolsable y corresponde a lo propuesto digitalmente. Una vez entregado el documento final, se hace el pago de la propuesta entregada.<br/><br/>La propuesta digital presentada está sujeta a un cambio sin costo. En caso de que requiera otros cambios, estos tendrán un costo adicional.",
+                "Pago y Financiamiento": "Para dar inicio al proceso de diseño, se requiere un avance del 50% del monto total y la firma de este documento. El 50% restante se abonará contra entrega, al momento de presentar el documento final. Este pago corresponde exclusivamente a la propuesta digital de diseño y distribución y <b>no es reembolsable</b>.<br/><br/>La cotización para la ejecución del proyecto, así como el acompañamiento en obra, se presentará por separado una vez aprobada la propuesta.<br/><br/>La propuesta digital presentada está sujeta a un cambio sin costo. En caso de que requiera otros cambios, estos tendrán un costo adicional.",
                 
-                "Propiedad Intelectual": f"La información contenida en este documento es propiedad única de RK ArtSide y Reyka Kawashiro y {client_name}. Cualquier reproducción en partes o en su totalidad se prohíbe sin el permiso de RK ArtSide, Reyka Kawashiro y {client_name}.",
+                "Propiedad Intelectual": "Los diseños, planos y propuestas digitales presentados son propiedad intelectual de RK ArtSide SRL. El cliente adquiere el derecho de uso exclusivamente para la ejecución del proyecto acordado. Queda prohibida su reproducción, distribución o uso para otros fines sin autorización escrita de RK ArtSide SRL.",
             }
         
         # Build all content paragraphs
@@ -383,8 +409,17 @@ class RKDocument:
             section_para = f"<b><font color='#9A8455'>{title}:</font></b><br/>{content}"
             all_paragraphs.append(section_para)
         
-        # Draw paragraphs
-        content_end_y = self.draw_paragraph_block(all_paragraphs, self.y_pos, 50)
+        # Calculate space needed for closing and signature
+        # Closing: 4 lines * 14px = 56px
+        # Gap: 20px
+        # Signature area: 30px (line + labels)
+        # Stamp: 80px height
+        # Bottom margin: 50px
+        # Total needed at bottom: ~220px
+        min_space_needed = 220
+        
+        # Draw paragraphs with calculated space
+        content_end_y = self.draw_paragraph_block(all_paragraphs, self.y_pos, min_space_needed)
 
         # Default closing paragraphs
         if closing_paragraphs is None:
@@ -396,16 +431,18 @@ class RKDocument:
             ]
 
         # Draw closing dynamically below content
-        closing_y = content_end_y - 20
+        self.y_pos = content_end_y - 20
         self.c.setFont("Helvetica", 10)
         self.c.setFillColor(DARK)
 
         for line in closing_paragraphs:
-            closing_y -= 14
-            self.c.drawString(50, closing_y, line)
+            self.check_page_break(needed_height=30)
+            self.y_pos -= 14
+            self.c.drawString(50, self.y_pos, line)
 
-        # Signature area below closing
-        sig_y = closing_y - 30
+        # Signature area below closing (needs less space now with 80px stamp)
+        self.check_page_break(needed_height=120)
+        sig_y = self.y_pos - 30
 
         # Client signature line
         self.c.setStrokeColor(LIGHT_GOLD)
@@ -417,8 +454,8 @@ class RKDocument:
         self.c.setFillColor(DARK)
         self.c.drawString(50, sig_y - 24, client_name)
 
-        # Draw stamp next to signature
-        self.draw_stamp()
+        # Draw stamp next to signature (smaller for letters, positioned more to the right)
+        self.draw_stamp(y=sig_y - 60, size=80)
 
         self.y_pos = sig_y - 40
         
