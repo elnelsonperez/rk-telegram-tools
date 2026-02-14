@@ -15,6 +15,7 @@ _DOC_TYPE_KEYWORDS = {
     "COT": ["cotizaci", "cotización"],
     "PRES": ["presupuest"],
     "REC": ["recibo"],
+    "CARTA": ["carta", "compromiso"],
 }
 
 

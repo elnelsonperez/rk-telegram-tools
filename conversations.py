@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS document_counters (
 );
 """
 
-DOC_TYPES = {"COT": "Cotización", "PRES": "Presupuesto", "REC": "Recibo"}
+DOC_TYPES = {"COT": "Cotización", "PRES": "Presupuesto", "REC": "Recibo", "CARTA": "Carta de Compromiso"}
 
 
 def _retry_on_disconnect(method):
