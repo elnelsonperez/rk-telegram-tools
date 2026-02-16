@@ -29,7 +29,8 @@ def load_config() -> Config:
     db_password = os.environ["DATABASE_PASSWORD"]
     db_host = os.environ["DATABASE_HOST"]
     db_name = os.environ["DATABASE_NAME"]
-    database_url = f"postgresql://{db_user}:{db_password}@{db_host}/{db_name}?sslmode=require"
+    endpoint_id = db_host.split(".")[0]
+    database_url = f"postgresql://{db_user}:{db_password}@{db_host}/{db_name}?sslmode=require&options=endpoint%3D{endpoint_id}"
 
     return Config(
         telegram_bot_token=os.environ["TELEGRAM_BOT_TOKEN"],
