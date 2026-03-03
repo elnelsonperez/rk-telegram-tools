@@ -133,7 +133,7 @@ class ClaudeClient:
 
         logger.info("Claude API call: %d messages, container=%s", len(messages), container_id)
         response = self._api_call_with_retry(
-            model="claude-sonnet-4-6-20260310",
+            model="claude-sonnet-4-6",
             max_tokens=4096,
             betas=BETAS,
             system=system,
@@ -152,7 +152,7 @@ class ClaudeClient:
             logger.info("Claude pause_turn, continuing (%d/%d)", continuation, MAX_CONTINUATIONS)
             messages = messages + [{"role": "assistant", "content": response.content}]
             response = self._api_call_with_retry(
-                model="claude-sonnet-4-6-20260310",
+                model="claude-sonnet-4-6",
                 max_tokens=4096,
                 betas=BETAS,
                 system=system,
