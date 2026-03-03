@@ -1,8 +1,12 @@
 import logging
+import time
 from dataclasses import dataclass, field
 import anthropic
 
 logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+RETRY_DELAYS = [1, 2, 4]  # seconds between retries
 
 SYSTEM_PROMPT = """Eres el asistente de documentos de RK ArtSide SRL. Generas cotizaciones, presupuestos, recibos de pago y cartas de compromiso.
 
@@ -92,6 +96,19 @@ class ClaudeClient:
     def needs_continuation(self, response) -> bool:
         return response.stop_reason == "pause_turn"
 
+    def _api_call_with_retry(self, **kwargs):
+        for attempt in range(MAX_RETRIES):
+            try:
+                return self._client.beta.messages.create(**kwargs)
+            except (anthropic.InternalServerError, anthropic.APIConnectionError,
+                    anthropic.RateLimitError) as e:
+                if attempt == MAX_RETRIES - 1:
+                    raise
+                delay = RETRY_DELAYS[attempt]
+                logger.warning("Claude API error (attempt %d/%d), retrying in %ds: %s",
+                               attempt + 1, MAX_RETRIES, delay, e)
+                time.sleep(delay)
+
     def send_message(self, messages: list[dict], container_id: str | None = None,
                      system_extra: str = "") -> ClaudeResponse:
         container = {
@@ -115,8 +132,8 @@ class ClaudeClient:
                 }
 
         logger.info("Claude API call: %d messages, container=%s", len(messages), container_id)
-        response = self._client.beta.messages.create(
-            model="claude-haiku-4-5-20251001",
+        response = self._api_call_with_retry(
+            model="claude-sonnet-4-6-20260310",
             max_tokens=4096,
             betas=BETAS,
             system=system,
@@ -134,8 +151,8 @@ class ClaudeClient:
             continuation += 1
             logger.info("Claude pause_turn, continuing (%d/%d)", continuation, MAX_CONTINUATIONS)
             messages = messages + [{"role": "assistant", "content": response.content}]
-            response = self._client.beta.messages.create(
-                model="claude-haiku-4-5-20251001",
+            response = self._api_call_with_retry(
+                model="claude-sonnet-4-6-20260310",
                 max_tokens=4096,
                 betas=BETAS,
                 system=system,

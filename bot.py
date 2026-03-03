@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 
+import anthropic
 import httpx
 from claude_client import ClaudeClient, ClaudeResponse
 from conversations import ConversationStore, DOC_TYPES
@@ -93,6 +94,8 @@ async def handle_message(
 
     # Voice messages sent as replies to the bot are always handled
     if not is_voice and not mentioned and not replied:
+        logger.debug("Ignoring message: not voice, not mentioned, not replied. chat=%s entities=%s",
+                     chat_id, message.entities)
         return
 
     # For voice messages not directed at the bot, send a one-time reminder
@@ -202,11 +205,19 @@ async def handle_message(
     try:
         result = claude.send_message(conv.messages, container_id=conv.container_id,
                                      system_extra=doc_number_context)
+    except (anthropic.InternalServerError, anthropic.APIConnectionError,
+            anthropic.RateLimitError):
+        logger.exception("Claude API transient error for chat=%s root=%s", chat_id, root_id)
+        await _send_text(telegram_token, chat_id, message.message_id,
+                         "El servicio de Anthropic está temporalmente sobrecargado. Intenta de nuevo en unos minutos.")
+        conv.messages.pop()
+        store.save(chat_id, root_id, conv)
+        return
     except Exception:
         logger.exception("Claude API error for chat=%s root=%s", chat_id, root_id)
         await _send_text(telegram_token, chat_id, message.message_id,
                          "Error generando el documento. Intenta de nuevo.")
-        conv.messages.pop()  # remove failed user message
+        conv.messages.pop()
         store.save(chat_id, root_id, conv)
         return
 

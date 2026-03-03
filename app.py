@@ -58,17 +58,22 @@ async def webhook(request: Request) -> JSONResponse:
         logger.info("Webhook received: chat=%s user=%s text=%r",
                      update.message.chat.id, user_name, msg_preview)
 
-        asyncio.create_task(
-            handle_message(
-                message=update.message,
-                bot_user_id=_bot_user_id,
-                bot_username=_bot_username,
-                claude=claude,
-                store=store,
-                transcriber=transcriber,
-                telegram_token=config.telegram_bot_token,
-            )
-        )
+        async def _safe_handle():
+            try:
+                await handle_message(
+                    message=update.message,
+                    bot_user_id=_bot_user_id,
+                    bot_username=_bot_username,
+                    claude=claude,
+                    store=store,
+                    transcriber=transcriber,
+                    telegram_token=config.telegram_bot_token,
+                )
+            except Exception:
+                logger.exception("Unhandled error in handle_message for chat=%s",
+                                 update.message.chat.id)
+
+        asyncio.create_task(_safe_handle())
     else:
         logger.debug("Webhook received non-text update, ignoring")
 
