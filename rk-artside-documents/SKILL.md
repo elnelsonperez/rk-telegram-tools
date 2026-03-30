@@ -1,147 +1,133 @@
 ---
 name: rk-artside-documents
-description: Generate professional PDF documents (cotizaciones, presupuestos, recibos, cartas de compromiso) for RK ArtSide SRL. Use when user mentions documento, cotización, presupuesto, recibo, factura, carta, compromiso, or RK ArtSide.
+description: Generate professional branded PDF documents for RK ArtSide SRL using HTML and WeasyPrint. Use when the user asks to create any document — cotizaciones, presupuestos, recibos, cartas, contratos, facturas, or any professional document.
 ---
 
 # RK ArtSide Document Generator
 
 ## Overview
-Generate professional PDF documents (quotations, budgets, payment receipts) for RK ArtSide SRL, an interior design company in Santiago, Dominican Republic.
 
-## When to Use
-Use this skill when the user asks to create:
-- Cotización / Quotation
-- Presupuesto / Budget
-- Recibo de pago / Payment receipt
-- Carta de compromiso / Commitment letter
+Generate professional PDF documents using HTML + CSS + WeasyPrint for RK ArtSide SRL, an interior design company in Santiago, Dominican Republic. This is a **brand system**, not a fixed set of document types. Use the brand toolkit and component library to compose **any** document type the user needs.
 
-Or mentions: documento, factura, cliente, precio, ITBIS, RK ArtSide, carta, compromiso
+## Brand System
+
+### Colors
+| Token       | Hex       | Usage                     |
+|-------------|-----------|---------------------------|
+| Gold        | `#9A8455` | Primary — headings, lines, accents |
+| Cream       | `#FFF6ED` | Page / section backgrounds |
+| Dark        | `#333333` | Body text                 |
+| Light Gold  | `#C4B896` | Borders, subtle accents   |
+| White       | `#FFFFFF` | Table header text, contrast |
+
+### Typography
+- **Font stack:** Helvetica, Arial, sans-serif
+- **Headings:** Gold color, bold weight
+- **Body:** Dark (#333) color, regular weight
+- **Sizes:** Title 24px, subtitles 14px, body 10-11px, fine print 8px
+
+### Assets
+Located in this skill's `assets/` folder:
+- **`logo.png`** — RK ArtSide logo. Place in the document header.
+- **`sello.png`** — Company stamp. Place near signatures or at the end of the document.
+
+Copy assets to the working directory before generating:
+```bash
+cp /path/to/skill/assets/logo.png /home/claude/logo.png
+cp /path/to/skill/assets/sello.png /home/claude/sello.png
+```
+
+### Page Size
+- **Default:** Legal (8.5in x 14in)
+- Claude may choose A4, Letter, or landscape orientation if the content calls for it
+
+## WeasyPrint Workflow
+
+```bash
+pip install weasyprint --break-system-packages
+```
+
+```python
+from weasyprint import HTML
+import base64, pathlib
+
+# Convert images to data URIs for reliable embedding
+def img_to_data_uri(path):
+    data = pathlib.Path(path).read_bytes()
+    b64 = base64.b64encode(data).decode()
+    ext = pathlib.Path(path).suffix.lstrip('.')
+    mime = 'image/png' if ext == 'png' else f'image/{ext}'
+    return f'data:{mime};base64,{b64}'
+
+logo_uri = img_to_data_uri('/home/claude/logo.png')
+sello_uri = img_to_data_uri('/home/claude/sello.png')
+
+# Insert data URIs into <img src="..."> tags in html_content
+HTML(string=html_content).write_pdf('/home/claude/output.pdf')
+```
 
 ## Company Info
-- **Name:** RK ArtSide SRL
-- **RNC:** 1-33-51750-7
-- **Email:** rkartside@gmail.com
-- **Phone:** 809 645 7575
-- **Contact:** Reyka Kawashiro
-- **Location:** Santiago, R.D.
-- **Currency:** RD$ (Dominican Pesos)
 
-## Brand Colors
-```python
-GOLD = '#9A8455'       # Primary
-CREAM = '#FFF6ED'      # Background
-DARK = '#333333'       # Text
-LIGHT_GOLD = '#C4B896' # Accents
-```
+| Field      | Value                  |
+|------------|------------------------|
+| Name       | RK ArtSide SRL         |
+| RNC        | 1-33-51750-7           |
+| Email      | rkartside@gmail.com    |
+| Phone      | 809 645 7575           |
+| Contact    | Reyka Kawashiro         |
+| Location   | Santiago, R.D.         |
+| Currency   | RD$ (user can override)|
 
-## Assets
-The following assets are included in this skill's `assets/` folder:
-- `logo.png` - RK ArtSide logo
-- `sello.png` - Company stamp
+## ITBIS Rules (18% Dominican Tax)
 
-Copy these to your working directory before generating documents.
+**ITBIS is OPT-IN ONLY.** Do NOT compute, ask about, or mention ITBIS unless the user explicitly brings it up.
 
-## Document Types
+When the user requests ITBIS:
+- **Prices include ITBIS:** Subtotal = Total / 1.18, ITBIS = Total - Subtotal
+- **Prices exclude ITBIS:** ITBIS = Subtotal x 0.18, Total = Subtotal + ITBIS
+- Show a clear breakdown: Subtotal, ITBIS (18%), Total
 
-### 1. COTIZACIÓN (Quotation)
-**Use for:** Pricing before confirming work
-**Structure:**
-- Header with logo + company info
-- Title "COTIZACIÓN" + number (COT-YYYY-NNN) + date
-- Client info
-- Table: Description | Qty | Unit Price | ITBIS | Subtotal
-- Section subtotals if multiple categories
-- Tax breakdown + Total
-- Company stamp
+## HTML/CSS Component Library
 
-### 2. PRESUPUESTO (Budget)
-**Use for:** Specific projects with descriptions
-**Structure:**
-- Header with logo + company info
-- Title "PRESUPUESTO" + subtitle + number (PRES-YYYY-NNN) + date
-- Client info
-- Work description (table or descriptive text)
-- Specifications/includes if applicable
-- Total
-- Company stamp
+See **references/patterns.md** for the complete set of reusable HTML/CSS components including:
+- Base page template with @page rules
+- Branded header with logo
+- Client info block
+- Item tables (simple and with ITBIS)
+- Totals sections
+- Amount highlight box
+- Signature areas
+- Stamp placement
+- Full example compositions
 
-### 3. RECIBO DE PAGO (Payment Receipt)
-**Use for:** Confirming received payments
-**Structure:**
-- Header with logo + company info
-- Title "RECIBO DE PAGO" + number (REC-YYYY-NNN) + date
-- "Recibido de:" + client name (use spacing=70 for proper spacing before amount box)
-- Amount (highlighted in gold box)
-- Payment concept
-- ITBIS breakdown if applicable
-- Company stamp
+## Example Document Types
 
-**Important:** When calling `draw_client()` for recibos with label "RECIBIDO DE:", use `spacing=70` parameter to add more space before the amount box.
+These are **examples**, not the only documents possible. Claude can create ANY document type using the brand components.
 
-### 4. CARTA DE COMPROMISO (Commitment Letter)
-**Use for:** Formalizing project agreements with clients
-**Structure:**
-- Header with logo + company info
-- Title "CARTA DE COMPROMISO" + number (CARTA-YYYY-NNN) + date
-- Personalized salutation
-- Introduction paragraphs (customizable)
-- Sections with gold titles (customizable):
-  - Visita y Propuesta Digital (with fee amount)
-  - Plazo de Entrega (with delivery days and project description)
-  - Pago y Financiamiento
-  - Propiedad Intelectual
-- Closing paragraphs (customizable)
-- Client signature line
-- Company stamp
+### Cotizacion (COT-YYYY-NNN)
+Quotation with item table, quantities, prices, and totals.
 
-**Flexibility:** The commitment letter supports custom content:
-- Default content covers standard terms
-- All paragraphs and sections can be modified if needed
-- Claude can adapt text based on specific client requirements
+### Presupuesto (PRES-YYYY-NNN)
+Project budget with descriptions and line-item costs.
 
-**Required parameters:**
-- `client_name`: Client's full name
-- `project_description`: What will be delivered
-- `visit_fee`: Amount for visit and digital proposal (RD$)
-- `delivery_days`: Number of days for delivery
+### Recibo de Pago (REC-YYYY-NNN)
+Payment receipt with prominent amount box and payment concept.
 
-**Optional parameters** (for customization):
-- `salutation`: Custom salutation (e.g., "Estimada Sra. Mariel Rosario:"). Infer "Estimado" or "Estimada" from the client's name.
-- `intro_paragraphs`: Custom introduction text
-- `sections`: Modified or additional sections
-- `closing_paragraphs`: Custom closing text
-
-## ITBIS Rules (18% Tax)
-**Applies to:** Cotizaciones, Presupuestos, Recibos. **Does NOT apply to Cartas de Compromiso.**
-**ALWAYS ask the user:**
-1. Do prices include ITBIS or not?
-2. Should the document show ITBIS breakdown?
-
-**Calculations:**
-- If prices INCLUDE ITBIS: `Subtotal = Total / 1.18`, `ITBIS = Total - Subtotal`
-- If prices EXCLUDE ITBIS: `ITBIS = Subtotal * 0.18`, `Total = Subtotal + ITBIS`
-
-## Workflow
-1. Identify document type
-2. Gather: client name, items/services, quantities, prices
-3. **Ask about ITBIS** (included? show breakdown?)
-4. **Verify math manually** before generating
-5. Generate PDF using template from TEMPLATE.py
-6. Present to user
+### Carta de Compromiso (CARTA-YYYY-NNN)
+Commitment letter with customizable sections, terms, and signature area.
 
 ## Date Format
-- Default: Current date
+
+- Default: current date
 - Format: DD/MM/YYYY
-- User can specify different date
+- User can specify a different date
 
-## Generation
-Use the template in TEMPLATE.py. Key steps:
-```python
-# 1. Copy assets
-# 2. Import template class
-# 3. Create document instance
-# 4. Add content
-# 5. Save and present
-```
+## Workflow
 
-See TEMPLATE.py for complete implementation.
+1. Identify what the user needs (document type, content, audience)
+2. Gather: client name, items/services, quantities, prices, any special requirements
+3. Generate ITBIS breakdown **only if the user mentioned it**
+4. Verify all math manually before generating
+5. Build HTML using components from references/patterns.md
+6. Generate PDF with WeasyPrint
+7. Present to user

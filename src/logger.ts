@@ -1,0 +1,14 @@
+import pino from "pino";
+
+const isDev = process.env.NODE_ENV !== "production";
+const level = process.env.LOG_LEVEL ?? (isDev ? "debug" : "info");
+
+const logger = pino(
+  isDev ? { level, transport: { target: "pino-pretty", options: { colorize: true } } } : { level },
+);
+
+export function createLogger(name: string) {
+  return logger.child({ component: name });
+}
+
+export default logger;
