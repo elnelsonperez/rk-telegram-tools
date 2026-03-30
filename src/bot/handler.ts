@@ -311,12 +311,15 @@ export function registerHandlers(
     }
 
     // Transcribe voice
-    await ctx.reply("🎙️ Transcribiendo audio...", { reply_to_message_id: msg.message_id });
+    const statusMsg = await ctx.reply("🎙️ Transcribiendo audio...", {
+      reply_to_message_id: msg.message_id,
+    });
     const transcript = await transcribeVoice(
       config.TELEGRAM_BOT_TOKEN,
       config.SONIOX_API_KEY,
       msg.voice.file_id,
     );
+    await ctx.api.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
     if (!transcript) {
       await ctx.reply("❌ No pude transcribir el audio. Intenta de nuevo o escribe tu mensaje.", {
         reply_to_message_id: msg.message_id,
