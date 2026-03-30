@@ -29,7 +29,7 @@ export function getConfirmKeyboard(): InlineKeyboard {
 export function getPostGenerateKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text("✏️ Editar", "action:modify")
-    .text("📄 Nuevo documento", "action:new_doc");
+    .text("📄 Nuevo Doc", "action:new_doc");
 }
 
 export function getResumeKeyboard(): InlineKeyboard {
