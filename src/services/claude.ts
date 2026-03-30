@@ -205,11 +205,12 @@ export class ClaudeClient {
         currentContainerId = response.container.id;
       }
 
-      // Log usage
-      log.debug(
+      // Log usage at info level so it's visible in production
+      log.info(
         {
           attempt: attempts,
           stopReason: response.stop_reason,
+          containerId: currentContainerId,
           inputTokens: response.usage?.input_tokens,
           outputTokens: response.usage?.output_tokens,
           cacheCreation: response.usage?.cache_creation_input_tokens,
@@ -222,20 +223,25 @@ export class ClaudeClient {
         break;
       }
 
-      // For continuation, append assistant response and empty user turn
-      messages = [
-        ...messages,
-        { role: "assistant", content: blocks },
-        { role: "user", content: [{ type: "text", text: "Continue." }] },
-      ];
+      // For continuation, append assistant response and continue
+      messages = [...messages, { role: "assistant", content: blocks }];
     } while (attempts < maxContinuations);
 
     if (attempts >= maxContinuations) {
-      log.warn("Reached maximum continuation attempts (%d)", maxContinuations);
+      log.warn({ attempts: maxContinuations }, "Reached maximum continuation attempts");
     }
 
     const result = extractResponse(allContent);
     result.containerId = currentContainerId ?? null;
+    log.info(
+      {
+        action: result.sessionAction,
+        fileCount: result.fileIds.length,
+        continuations: attempts,
+        textLength: result.text?.length,
+      },
+      "Claude response extracted",
+    );
     return result;
   }
 
