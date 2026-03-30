@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Bot } from "grammy";
 import { createWebhookApp } from "./app.js";
+import { registerCallbacks } from "./bot/callbacks.js";
 import { registerCommands } from "./bot/commands.js";
 import { registerHandlers } from "./bot/handler.js";
 import { loadConfig } from "./config.js";
@@ -34,6 +35,7 @@ bot.use(async (ctx, next) => {
   await next();
 });
 
+registerCallbacks(bot, conversationStore, claudeClient, config);
 registerCommands(bot, conversationStore);
 registerHandlers(bot, conversationStore, claudeClient, config);
 

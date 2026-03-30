@@ -6,6 +6,12 @@ import { createLogger } from "../logger.js";
 import type { ClaudeClient, ClaudeResponse } from "../services/claude.js";
 import type { ConversationStore } from "../services/conversation.js";
 import { transcribeVoice } from "../services/transcriber.js";
+import {
+  getConfirmKeyboard,
+  getDocTypeKeyboard,
+  getPostGenerateKeyboard,
+  getResumeKeyboard,
+} from "./keyboards.js";
 
 const log = createLogger("handler");
 
@@ -145,10 +151,11 @@ export async function processMessage(
 
   // 2. Stale session check
   if (conv.sessionState !== SessionState.Idle && isStale(conv.lastActivity)) {
-    await ctx.reply(
-      "⏰ Pasaron más de 15 minutos desde tu último mensaje. ¿Quieres continuar o iniciar uno nuevo con /nuevo?",
-      { reply_to_message_id: replyToMsgId },
-    );
+    const sent = await ctx.reply("⏰ Pasaron más de 15 minutos. ¿Continúas o empiezas de nuevo?", {
+      reply_to_message_id: replyToMsgId,
+      reply_markup: getResumeKeyboard(),
+    });
+    await conversationStore.registerMessage(chatId, sent.message_id, rootId);
     return;
   }
 
@@ -211,23 +218,28 @@ export async function processMessage(
 
   // 10. Send response text
   if (response.text) {
+    const replyMarkup = sessionAction === SessionAction.Confirm ? getConfirmKeyboard() : undefined;
     const sent = await ctx.reply(response.text, {
       reply_to_message_id: replyToMsgId,
       parse_mode: "Markdown",
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     });
     // Register the bot's reply so future replies to it are tracked
     await conversationStore.registerMessage(chatId, sent.message_id, rootId);
   }
 
   // 11. Send files
-  for (const fileId of response.fileIds) {
+  for (let i = 0; i < response.fileIds.length; i++) {
+    const fileId = response.fileIds[i];
     try {
       const fileBuffer = await claudeClient.downloadFile(fileId);
       const fileName = conv.docType
         ? `${conv.docType}-${Date.now()}.pdf`
         : `documento-${Date.now()}.pdf`;
+      const isLast = i === response.fileIds.length - 1;
       const sent = await ctx.replyWithDocument(new InputFile(fileBuffer, fileName), {
         reply_to_message_id: replyToMsgId,
+        ...(isLast ? { reply_markup: getPostGenerateKeyboard() } : {}),
       });
       await conversationStore.registerMessage(chatId, sent.message_id, rootId);
     } catch (err) {
@@ -378,7 +390,14 @@ export function registerHandlers(
       // 3. Not directed at bot — check for active session
       else {
         const active = await conversationStore.findActiveForChat(chatId);
-        if (!active) return; // No active session, ignore
+        if (!active) {
+          // No active session — show doc type picker
+          await ctx.reply("¿Qué documento necesitas?", {
+            reply_to_message_id: msg.message_id,
+            reply_markup: getDocTypeKeyboard(),
+          });
+          return;
+        }
         rootId = active.rootMessageId;
         userText = text;
       }
