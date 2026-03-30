@@ -375,9 +375,12 @@ export function registerHandlers(
           rootId = msg.message_id;
         }
       }
-      // 3. Not directed at bot → ignore
+      // 3. Not directed at bot — check for active session
       else {
-        return;
+        const active = await conversationStore.findActiveForChat(chatId);
+        if (!active) return; // No active session, ignore
+        rootId = active.rootMessageId;
+        userText = text;
       }
     } else {
       // --- DM ROUTING ---

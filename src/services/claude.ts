@@ -183,12 +183,12 @@ export class ClaudeClient {
         ],
         messages,
         tools: [
-          { type: "code_execution" as const },
+          { type: "code_execution_20250825" as const, name: "code_execution" as const },
           { ...RESPOND_TOOL, cache_control: { type: "ephemeral" as const } },
         ],
         container: {
           ...(currentContainerId ? { id: currentContainerId } : {}),
-          skill: { skill_id: skillId },
+          skills: [{ type: "custom", skill_id: skillId, version: "latest" }],
         },
         betas: ["code-execution-2025-08-25", "skills-2025-10-02"],
       };
