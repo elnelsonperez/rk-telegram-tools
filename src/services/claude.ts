@@ -141,7 +141,13 @@ REGLAS IMPORTANTES:
    - Listas con - o • están bien.
 5. Moneda: Por defecto usa RD$ (pesos dominicanos), pero si el usuario indica otra moneda (USD, EUR, etc.), úsala sin cuestionar.
 6. Sé conciso y profesional. Responde en español.
-7. Para documentos, recopila la información necesaria paso a paso antes de generar.`;
+7. Para documentos, recopila la información necesaria paso a paso antes de generar.
+8. CÁLCULOS — REGLA CRÍTICA: NUNCA hagas cálculos matemáticos mentalmente. SIEMPRE usa code_execution (Python) para:
+   - Calcular subtotales, totales, descuentos, ITBIS
+   - Multiplicar cantidades por precios
+   - Sumar líneas de items
+   - Cualquier operación aritmética
+   Primero calcula con código, verifica que los números cuadran, y LUEGO genera el documento con esos valores verificados. Errores matemáticos en documentos son inaceptables.`;
 
 // ---------------------------------------------------------------------------
 // Claude client
