@@ -99,14 +99,11 @@ export function registerCallbacks(
     for (let i = 0; i < result.fileIds.length; i++) {
       const fileId = result.fileIds[i];
       try {
-        const data = await claudeClient.downloadFile(fileId);
+        const { filename, data } = await claudeClient.downloadFile(fileId);
         const isLast = i === result.fileIds.length - 1;
-        const fileName = conv.docType
-          ? `${conv.docType}-${Date.now()}.pdf`
-          : `documento-${Date.now()}.pdf`;
         const docMsg = await ctx.api.sendDocument(
           chatId,
-          new InputFile(new Uint8Array(data), fileName),
+          new InputFile(new Uint8Array(data), filename),
           {
             ...(canUseCaption && i === 0
               ? { caption: result.text, parse_mode: "Markdown" as const }

@@ -161,7 +161,7 @@ export class ClaudeClient {
     containerId?: string,
   ): Promise<ClaudeResponse> {
     // Split system into stable (cacheable) and dynamic (per-turn) blocks
-    const system: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [
+    const system: Anthropic.Beta.BetaTextBlockParam[] = [
       { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
     ];
     if (systemExtra) {
@@ -177,19 +177,21 @@ export class ClaudeClient {
 
     const tools = [
       { type: "code_execution_20250825" as const, name: "code_execution" as const },
-      { ...RESPOND_TOOL, cache_control: { type: "ephemeral" as const } },
-    ];
+      {
+        ...(RESPOND_TOOL as unknown as Anthropic.Beta.BetaToolUnion),
+        cache_control: { type: "ephemeral" as const },
+      },
+    ] as Anthropic.Beta.BetaToolUnion[];
 
     log.info({ messageCount: messages.length, skillId, containerId }, "Sending Claude API request");
 
-    // biome-ignore lint/suspicious/noExplicitAny: Anthropic SDK types for beta APIs
-    let response: any = await (this.client.beta.messages as any).create({
+    let response = await this.client.beta.messages.create({
       model: "claude-sonnet-4-6",
       max_tokens: 16384,
       betas: BETAS,
       system,
       container,
-      messages,
+      messages: messages as Anthropic.Beta.BetaMessageParam[],
       tools,
     });
 
@@ -197,7 +199,9 @@ export class ClaudeClient {
     // Accumulate content blocks from ALL responses so we don't miss
     // the respond tool call if it happens in an intermediate turn.
     const allContent: unknown[] = [...(response.content as unknown[])];
-    let currentMessages = [...messages];
+    let currentMessages: Anthropic.Beta.BetaMessageParam[] = [
+      ...(messages as Anthropic.Beta.BetaMessageParam[]),
+    ];
     let continuations = 0;
 
     for (let i = 0; i < MAX_CONTINUATIONS; i++) {
@@ -210,14 +214,13 @@ export class ClaudeClient {
 
       currentMessages = [...currentMessages, { role: "assistant", content: response.content }];
 
-      // biome-ignore lint/suspicious/noExplicitAny: Anthropic SDK types for beta APIs
-      response = await (this.client.beta.messages as any).create({
+      response = await this.client.beta.messages.create({
         model: "claude-sonnet-4-6",
         max_tokens: 16384,
         betas: BETAS,
         system,
         container: { id: response.container?.id, ...container },
-        messages: currentMessages,
+        messages: currentMessages as Anthropic.Beta.BetaMessageParam[],
         tools,
       });
       allContent.push(...(response.content as unknown[]));
@@ -225,8 +228,7 @@ export class ClaudeClient {
 
     const result = extractResponse(allContent);
     result.containerId = response.container?.id ?? null;
-    // biome-ignore lint/suspicious/noExplicitAny: usage type from beta API
-    const usage = response.usage as any;
+    const usage = response.usage as unknown as Record<string, number> | undefined;
     log.info(
       {
         action: result.sessionAction,
@@ -243,24 +245,15 @@ export class ClaudeClient {
     return result;
   }
 
-  async downloadFile(fileId: string): Promise<Buffer> {
-    // biome-ignore lint/suspicious/noExplicitAny: beta files API
-    const fileResponse = await (this.client.beta as any).files.download(fileId, {
+  async downloadFile(fileId: string): Promise<{ filename: string; data: Buffer }> {
+    const metadata = await this.client.beta.files.retrieveMetadata(fileId, {
       betas: ["files-api-2025-04-14"],
     });
-
-    const chunks: Uint8Array[] = [];
-    const reader = fileResponse.body.getReader();
-
-    let streamDone = false;
-    while (!streamDone) {
-      const { done, value } = await reader.read();
-      streamDone = done;
-      if (!done) {
-        chunks.push(value);
-      }
-    }
-
-    return Buffer.concat(chunks);
+    const content = await this.client.beta.files.download(fileId, {
+      betas: ["files-api-2025-04-14"],
+    });
+    const data = Buffer.from(await content.arrayBuffer());
+    log.info({ fileId, filename: metadata.filename, size: data.length }, "File downloaded");
+    return { filename: metadata.filename, data };
   }
 }

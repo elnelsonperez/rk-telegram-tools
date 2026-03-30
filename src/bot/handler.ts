@@ -232,12 +232,9 @@ export async function processMessage(
   for (let i = 0; i < response.fileIds.length; i++) {
     const fileId = response.fileIds[i];
     try {
-      const fileBuffer = await claudeClient.downloadFile(fileId);
-      const fileName = conv.docType
-        ? `${conv.docType}-${Date.now()}.pdf`
-        : `documento-${Date.now()}.pdf`;
+      const { filename, data } = await claudeClient.downloadFile(fileId);
       const isLast = i === response.fileIds.length - 1;
-      const sent = await ctx.replyWithDocument(new InputFile(fileBuffer, fileName), {
+      const sent = await ctx.replyWithDocument(new InputFile(new Uint8Array(data), filename), {
         reply_to_message_id: replyToMsgId,
         ...(isLast ? { reply_markup: getPostGenerateKeyboard() } : {}),
       });
