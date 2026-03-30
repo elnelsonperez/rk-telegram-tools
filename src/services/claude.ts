@@ -3,6 +3,8 @@ import { SessionAction } from "../bot/session.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("claude");
+const BETAS = ["code-execution-2025-08-25", "skills-2025-10-02"];
+const MAX_CONTINUATIONS = 10;
 
 // ---------------------------------------------------------------------------
 // Respond tool schema
@@ -158,89 +160,85 @@ export class ClaudeClient {
     systemExtra?: string,
     containerId?: string,
   ): Promise<ClaudeResponse> {
-    const systemText = systemExtra ? `${SYSTEM_PROMPT}\n\n${systemExtra}` : SYSTEM_PROMPT;
+    // Split system into stable (cacheable) and dynamic (per-turn) blocks
+    const system: Array<{ type: "text"; text: string; cache_control?: { type: "ephemeral" } }> = [
+      { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+    ];
+    if (systemExtra) {
+      system.push({ type: "text", text: systemExtra });
+    }
 
-    let allContent: unknown[] = [];
-    let currentContainerId = containerId;
-    let attempts = 0;
-    const maxContinuations = 10;
+    const container: Record<string, unknown> = {
+      skills: [{ type: "custom", skill_id: skillId, version: "latest" }],
+    };
+    if (containerId) {
+      container.id = containerId;
+    }
+
+    const tools = [
+      { type: "code_execution_20250825" as const, name: "code_execution" as const },
+      { ...RESPOND_TOOL, cache_control: { type: "ephemeral" as const } },
+    ];
+
+    log.info({ messageCount: messages.length, skillId, containerId }, "Sending Claude API request");
 
     // biome-ignore lint/suspicious/noExplicitAny: Anthropic SDK types for beta APIs
-    let response: any;
+    let response: any = await (this.client.beta.messages as any).create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 16384,
+      betas: BETAS,
+      system,
+      container,
+      messages,
+      tools,
+    });
 
-    do {
-      attempts++;
+    // Handle pause_turn continuations.
+    // Accumulate content blocks from ALL responses so we don't miss
+    // the respond tool call if it happens in an intermediate turn.
+    const allContent: unknown[] = [...(response.content as unknown[])];
+    let currentMessages = [...messages];
+    let continuations = 0;
 
-      const requestParams = {
-        model: "claude-sonnet-4-6" as string,
-        max_tokens: 20000,
-        system: [
-          {
-            type: "text" as const,
-            text: systemText,
-            cache_control: { type: "ephemeral" as const },
-          },
-        ],
-        messages,
-        tools: [
-          { type: "code_execution_20250825" as const, name: "code_execution" as const },
-          { ...RESPOND_TOOL, cache_control: { type: "ephemeral" as const } },
-        ],
-        container: {
-          ...(currentContainerId ? { id: currentContainerId } : {}),
-          skills: [{ type: "custom", skill_id: skillId, version: "latest" }],
-        },
-        betas: ["code-execution-2025-08-25", "skills-2025-10-02"],
-      };
-
-      // biome-ignore lint/suspicious/noExplicitAny: beta API usage
-      response = await (this.client.beta.messages as any).create(requestParams);
-
-      // Accumulate content blocks across continuations
-      const blocks = response.content ?? [];
-      allContent = allContent.concat(blocks);
-
-      // Capture container ID from first response
-      if (!currentContainerId && response.container?.id) {
-        currentContainerId = response.container.id;
-      }
-
-      // Log usage at info level so it's visible in production
+    for (let i = 0; i < MAX_CONTINUATIONS; i++) {
+      if (!needsContinuation(response.stop_reason)) break;
+      continuations++;
       log.info(
-        {
-          attempt: attempts,
-          stopReason: response.stop_reason,
-          containerId: currentContainerId,
-          inputTokens: response.usage?.input_tokens,
-          outputTokens: response.usage?.output_tokens,
-          cacheCreation: response.usage?.cache_creation_input_tokens,
-          cacheRead: response.usage?.cache_read_input_tokens,
-        },
-        "Claude API response",
+        { continuation: continuations, stopReason: response.stop_reason },
+        "pause_turn continuation",
       );
 
-      if (!needsContinuation(response.stop_reason)) {
-        break;
-      }
+      currentMessages = [...currentMessages, { role: "assistant", content: response.content }];
 
-      // For continuation, append assistant response and continue
-      messages = [...messages, { role: "assistant", content: blocks }];
-    } while (attempts < maxContinuations);
-
-    if (attempts >= maxContinuations) {
-      log.warn({ attempts: maxContinuations }, "Reached maximum continuation attempts");
+      // biome-ignore lint/suspicious/noExplicitAny: Anthropic SDK types for beta APIs
+      response = await (this.client.beta.messages as any).create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 16384,
+        betas: BETAS,
+        system,
+        container: { id: response.container?.id, ...container },
+        messages: currentMessages,
+        tools,
+      });
+      allContent.push(...(response.content as unknown[]));
     }
 
     const result = extractResponse(allContent);
-    result.containerId = currentContainerId ?? null;
+    result.containerId = response.container?.id ?? null;
+    // biome-ignore lint/suspicious/noExplicitAny: usage type from beta API
+    const usage = response.usage as any;
     log.info(
       {
         action: result.sessionAction,
         fileCount: result.fileIds.length,
-        continuations: attempts,
-        textLength: result.text?.length,
+        continuations,
+        containerId: result.containerId,
+        inputTokens: usage?.input_tokens,
+        outputTokens: usage?.output_tokens,
+        cacheRead: usage?.cache_read_input_tokens,
+        cacheCreation: usage?.cache_creation_input_tokens,
       },
-      "Claude response extracted",
+      "Claude response complete",
     );
     return result;
   }
