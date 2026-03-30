@@ -349,6 +349,12 @@ export function registerHandlers(
     // Skip commands — they are handled by bot.command()
     if (text.startsWith("/")) return;
 
+    // Skip messages that mention someone else but not the bot
+    const hasMentions = msg.entities?.some(
+      (e) => e.type === "mention" || e.type === "text_mention",
+    );
+    if (hasMentions && !isBotMentioned(msg, botId, botUsername)) return;
+
     let rootId: number;
     let userText: string;
 
