@@ -138,6 +138,9 @@ export async function processMessage(
   claudeClient: ClaudeClient,
   config: Config,
 ): Promise<void> {
+  // Guard against empty messages
+  if (!userText.trim()) return;
+
   // 1. Quick reply check — skip Claude when idle + greeting
   const conv = await conversationStore.getOrCreate(chatId, rootId);
 
@@ -274,24 +277,35 @@ export function registerHandlers(
     const msg = ctx.message;
     const chatId = msg.chat.id;
     const botId = botInfo().id;
+    const botUsername = botInfo().username ?? "";
     const isGroup = msg.chat.type === "group" || msg.chat.type === "supergroup";
 
-    // In groups, voice must be a reply to the bot or there must be an active session
+    // Check for @mention in voice note caption
+    const captionMsg = { text: msg.caption, entities: msg.caption_entities };
+    const mentioned = isBotMentioned(captionMsg, botId, botUsername);
+
     let rootId: number | undefined;
 
     if (isGroup) {
-      // Check if reply to bot message
+      const isReplyToBot = msg.reply_to_message?.from?.id === botId;
+
       if (msg.reply_to_message) {
         const replyRoot = await conversationStore.findRoot(chatId, msg.reply_to_message.message_id);
         if (replyRoot != null) {
           rootId = replyRoot;
-        } else if (msg.reply_to_message.from?.id === botId) {
+        } else if (isReplyToBot) {
           rootId = msg.reply_to_message.message_id;
+        } else if (!mentioned) {
+          return; // Voice reply to non-bot message without mention, ignore
         } else {
-          return; // Voice reply to non-bot message, ignore
+          rootId = msg.message_id;
         }
+      } else if (mentioned) {
+        // @mention in voice caption — check for active session or start new
+        const active = await conversationStore.findActiveForChat(chatId);
+        rootId = active ? active.rootMessageId : msg.message_id;
       } else {
-        // No reply — check for active session
+        // No reply, no mention — check for active session
         const active = await conversationStore.findActiveForChat(chatId);
         if (active) {
           rootId = active.rootMessageId;
@@ -300,13 +314,14 @@ export function registerHandlers(
         }
       }
     } else {
-      // DM: use reply root or message itself as root
+      // DM: use reply root, active session, or message itself as root
       if (msg.reply_to_message) {
         rootId =
           (await conversationStore.findRoot(chatId, msg.reply_to_message.message_id)) ??
           msg.message_id;
       } else {
-        rootId = msg.message_id;
+        const active = await conversationStore.findActiveForChat(chatId);
+        rootId = active ? active.rootMessageId : msg.message_id;
       }
     }
 
@@ -327,13 +342,21 @@ export function registerHandlers(
       return;
     }
 
+    // Combine caption text (minus bot mention) with transcript
+    const captionText = mentioned
+      ? extractUserText(captionMsg, botId, botUsername)
+      : (msg.caption ?? "");
+    const userText = captionText
+      ? `${captionText}\n\n[Audio transcrito]: ${transcript}`
+      : transcript;
+
     await conversationStore.registerMessage(chatId, msg.message_id, rootId);
     await processMessage(
       ctx,
       chatId,
       rootId,
       msg.message_id,
-      transcript,
+      userText,
       conversationStore,
       claudeClient,
       config,
