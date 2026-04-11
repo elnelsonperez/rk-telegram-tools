@@ -5,6 +5,7 @@ import {
   inferDocType,
   isBotMentioned,
   isStale,
+  normalizeDocType,
 } from "../src/bot/handler";
 
 describe("isBotMentioned", () => {
@@ -111,6 +112,38 @@ describe("inferDocType", () => {
   it("case insensitive", () => {
     expect(inferDocType("COTIZACIÓN PARA MAÑANA")).toBe("COT");
     expect(inferDocType("PRESUPUESTO urgente")).toBe("PRES");
+  });
+});
+
+describe("normalizeDocType", () => {
+  it("maps Claude snake_case carta_compromiso to CARTA", () => {
+    expect(normalizeDocType("carta_compromiso")).toBe("CARTA");
+  });
+
+  it("maps cotizacion variants to COT", () => {
+    expect(normalizeDocType("cotizacion")).toBe("COT");
+    expect(normalizeDocType("Cotización")).toBe("COT");
+  });
+
+  it("maps presupuesto to PRES", () => {
+    expect(normalizeDocType("presupuesto")).toBe("PRES");
+  });
+
+  it("maps recibo to REC", () => {
+    expect(normalizeDocType("recibo_de_pago")).toBe("REC");
+  });
+
+  it("preserves short codes unchanged", () => {
+    expect(normalizeDocType("CARTA")).toBe("CARTA");
+    expect(normalizeDocType("COT")).toBe("COT");
+  });
+
+  it("strips underscores and uppercases unknown types", () => {
+    expect(normalizeDocType("contrato_servicio")).toBe("CONTRATOSERVICIO");
+  });
+
+  it("falls back to DOC when stripping leaves empty", () => {
+    expect(normalizeDocType("___")).toBe("DOC");
   });
 });
 

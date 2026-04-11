@@ -77,6 +77,26 @@ export function inferDocType(text: string): string | null {
   return null;
 }
 
+/**
+ * Normalize a document-type identifier to one of our short codes
+ * (COT/PRES/REC/CARTA). Claude's respond tool accepts a free-form
+ * string and tends to emit snake_case names like `carta_compromiso`,
+ * which leak into document numbers as `carta_compromiso-2026-003`.
+ * Unknown types are uppercased and stripped of non-alphanumerics so
+ * they still produce a presentable prefix.
+ */
+export function normalizeDocType(raw: string): string {
+  const probe = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[_\-\s]+/g, " ");
+  if (/cotiza/.test(probe)) return "COT";
+  if (/presupuesto/.test(probe)) return "PRES";
+  if (/recibo/.test(probe)) return "REC";
+  if (/carta/.test(probe)) return "CARTA";
+  return raw.toUpperCase().replace(/[^A-Z0-9]+/g, "") || "DOC";
+}
+
 export function isBotMentioned(
   message: Partial<Pick<Message, "text" | "entities">>,
   botId: number,
@@ -172,7 +192,10 @@ export async function processMessage(
     conv.docType = detectedDocType;
   }
 
-  // 4. Build per-turn system context
+  // 4. Build per-turn system context. Normalize first so legacy conversations
+  //    whose docType was written as Claude's free-form `carta_compromiso` get
+  //    corrected back to the short code (CARTA) on their next turn.
+  if (conv.docType) conv.docType = normalizeDocType(conv.docType);
   const year = new Date().getFullYear();
   let docNumber: string | undefined;
   if (conv.docType) {
@@ -215,7 +238,7 @@ export async function processMessage(
   // 8. Map action to state transition
   conv.sessionState = mapActionToState(sessionAction, conv.sessionState);
   conv.containerId = response.containerId;
-  if (response.docType) conv.docType = response.docType;
+  if (response.docType) conv.docType = normalizeDocType(response.docType);
 
   // Append assistant message
   conv.messages.push({ role: "assistant", content: response.text });
