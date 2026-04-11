@@ -1,7 +1,7 @@
 import type { Bot } from "grammy";
-import { createLogger } from "../logger.js";
-import type { ConversationStore } from "../services/conversation.js";
-import { SessionState } from "./session.js";
+import { createLogger } from "../logger";
+import type { ConversationStore } from "../services/conversation";
+import { SessionState } from "./session";
 
 const log = createLogger("commands");
 

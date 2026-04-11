@@ -139,6 +139,7 @@ REGLAS IMPORTANTES:
    - No uses encabezados (#)
    - NUNCA uses tablas Markdown (no se renderizan en Telegram). Usa listas con - o • en su lugar.
    - Listas con - o • están bien.
+   - CRÍTICO: Envuelve SIEMPRE en backticks (\`...\`) cualquier identificador, número de documento, nombre de archivo, email o ruta que contenga guion bajo (_). Ejemplo: usa \`carta_compromiso-2026-002\` en vez de carta_compromiso-2026-002. El parser de Telegram trata _ como cursiva incluso dentro de palabras, y un _ suelto rompe el mensaje entero.
 5. Moneda: Por defecto usa RD$ (pesos dominicanos), pero si el usuario indica otra moneda (USD, EUR, etc.), úsala sin cuestionar.
 6. Sé conciso y profesional. Responde en español.
 7. Para documentos, recopila la información necesaria paso a paso antes de generar.

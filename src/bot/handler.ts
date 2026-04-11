@@ -12,6 +12,7 @@ import {
   getPostGenerateKeyboard,
   getResumeKeyboard,
 } from "./keyboards.js";
+import { safeReplyAndRegister } from "./safe-send.js";
 
 const log = createLogger("handler");
 
@@ -219,16 +220,14 @@ export async function processMessage(
   // 9. Save conversation
   await conversationStore.save(chatId, rootId, conv);
 
-  // 10. Send response text
+  // 10. Send response text. A failure here never blocks file delivery —
+  //     the PDF is the valuable artifact; styling is cosmetic.
   if (response.text) {
     const replyMarkup = sessionAction === SessionAction.Confirm ? getConfirmKeyboard() : undefined;
-    const sent = await ctx.reply(response.text, {
+    await safeReplyAndRegister(ctx, response.text, conversationStore, chatId, rootId, {
       reply_to_message_id: replyToMsgId,
-      parse_mode: "Markdown",
       ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
     });
-    // Register the bot's reply so future replies to it are tracked
-    await conversationStore.registerMessage(chatId, sent.message_id, rootId);
   }
 
   // 11. Send files
@@ -252,11 +251,9 @@ export async function processMessage(
 
   // 12. Send pending question after file delivery
   if (response.pendingQuestion && response.fileIds.length > 0) {
-    const sent = await ctx.reply(response.pendingQuestion, {
+    await safeReplyAndRegister(ctx, response.pendingQuestion, conversationStore, chatId, rootId, {
       reply_to_message_id: replyToMsgId,
-      parse_mode: "Markdown",
     });
-    await conversationStore.registerMessage(chatId, sent.message_id, rootId);
   }
 }
 

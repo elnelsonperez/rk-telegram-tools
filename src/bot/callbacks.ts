@@ -1,10 +1,12 @@
 import type { Bot } from "grammy";
 import { InputFile } from "grammy";
+import type { Message } from "grammy/types";
 import type { Config } from "../config.js";
 import { createLogger } from "../logger.js";
 import type { ClaudeClient, ClaudeResponse } from "../services/claude.js";
 import type { ConversationStore } from "../services/conversation.js";
 import { DOC_TYPE_LABELS, getDocTypeKeyboard, getPostGenerateKeyboard } from "./keyboards.js";
+import { isMarkdownParseError, safeReplyAndRegister } from "./safe-send.js";
 import { SessionState } from "./session.js";
 
 const log = createLogger("callbacks");
@@ -90,10 +92,10 @@ export function registerCallbacks(
 
     const hasFiles = result.fileIds.length > 0;
     const canUseCaption = hasFiles && result.text && result.text.length <= 1024;
+    let captionAlreadySent = false;
 
     if (result.text && (!hasFiles || !canUseCaption)) {
-      const botMsg = await ctx.reply(result.text, { parse_mode: "Markdown" });
-      await conversationStore.registerMessage(chatId, botMsg.message_id, rootId);
+      await safeReplyAndRegister(ctx, result.text, conversationStore, chatId, rootId);
     }
 
     for (let i = 0; i < result.fileIds.length; i++) {
@@ -101,20 +103,38 @@ export function registerCallbacks(
       try {
         const { filename, data } = await claudeClient.downloadFile(fileId);
         const isLast = i === result.fileIds.length - 1;
-        const docMsg = await ctx.api.sendDocument(
-          chatId,
-          new InputFile(new Uint8Array(data), filename),
-          {
-            ...(canUseCaption && i === 0
-              ? { caption: result.text, parse_mode: "Markdown" as const }
-              : {}),
-            ...(isLast ? { reply_markup: getPostGenerateKeyboard() } : {}),
-          },
-        );
+        const useCaptionNow = canUseCaption && i === 0;
+        const baseOpts = isLast ? { reply_markup: getPostGenerateKeyboard() } : {};
+        const inputFile = new InputFile(new Uint8Array(data), filename);
+        let docMsg: Message.DocumentMessage;
+        try {
+          docMsg = await ctx.api.sendDocument(chatId, inputFile, {
+            ...(useCaptionNow ? { caption: result.text, parse_mode: "Markdown" as const } : {}),
+            ...baseOpts,
+          });
+          if (useCaptionNow) captionAlreadySent = true;
+        } catch (err) {
+          // If the caption's Markdown is malformed, Telegram rejects the whole
+          // sendDocument. Retry without caption so the file still ships, and
+          // send the text as a separate reply via the safe helper.
+          if (useCaptionNow && isMarkdownParseError(err)) {
+            log.warn(
+              { err, chatId, rootId, fileId },
+              "Caption Markdown parse failed, retrying document without caption",
+            );
+            docMsg = await ctx.api.sendDocument(chatId, inputFile, baseOpts);
+          } else {
+            throw err;
+          }
+        }
         await conversationStore.registerMessage(chatId, docMsg.message_id, rootId);
       } catch (err) {
         log.error({ err, chatId, rootId, fileId }, "Failed to send generated document");
       }
+    }
+
+    if (canUseCaption && !captionAlreadySent && result.text) {
+      await safeReplyAndRegister(ctx, result.text, conversationStore, chatId, rootId);
     }
   });
 
