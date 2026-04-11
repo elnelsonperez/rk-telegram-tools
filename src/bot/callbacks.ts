@@ -5,6 +5,7 @@ import type { Config } from "../config.js";
 import { createLogger } from "../logger.js";
 import type { ClaudeClient, ClaudeResponse } from "../services/claude.js";
 import type { ConversationStore } from "../services/conversation.js";
+import { processMessage } from "./handler.js";
 import { DOC_TYPE_LABELS, getDocTypeKeyboard, getPostGenerateKeyboard } from "./keyboards.js";
 import { isMarkdownParseError, safeReplyAndRegister } from "./safe-send.js";
 import { SessionState } from "./session.js";
@@ -183,7 +184,8 @@ export function registerCallbacks(
     await ctx.reply("¿Qué documento necesitas?", { reply_markup: getDocTypeKeyboard() });
   });
 
-  // Session resume
+  // Session resume — keep history, and if the stale check stashed a pending
+  // message, replay it so the user doesn't have to retype it.
   bot.callbackQuery("session:resume", async (ctx) => {
     await ctx.answerCallbackQuery();
     await dismissInlineKeyboard(ctx);
@@ -194,7 +196,23 @@ export function registerCallbacks(
 
     const rootId = (await conversationStore.findRoot(chatId, msgId)) ?? msgId;
     const conv = await conversationStore.getOrCreate(chatId, rootId);
-    await conversationStore.save(chatId, rootId, conv); // bumps last_activity
+    const pendingText = conv.pendingUserText;
+    conv.pendingUserText = null;
+    await conversationStore.save(chatId, rootId, conv); // also bumps last_activity
+
+    if (pendingText) {
+      await processMessage(
+        ctx,
+        chatId,
+        rootId,
+        undefined,
+        pendingText,
+        conversationStore,
+        claudeClient,
+        config,
+      );
+      return;
+    }
 
     const botMsg = await ctx.reply("▶️ Continuando. ¿Qué necesitas?", {
       reply_markup: { force_reply: true },
@@ -202,7 +220,9 @@ export function registerCallbacks(
     await conversationStore.registerMessage(chatId, botMsg.message_id, rootId);
   });
 
-  // Session new (discard stale)
+  // Session new (discard stale) — clear conversation history and, if the
+  // stale check stashed a pending message, process it as the first turn of
+  // the fresh session instead of asking the user to retype.
   bot.callbackQuery("session:new", async (ctx) => {
     await ctx.answerCallbackQuery();
     await dismissInlineKeyboard(ctx);
@@ -213,8 +233,27 @@ export function registerCallbacks(
 
     const rootId = (await conversationStore.findRoot(chatId, msgId)) ?? msgId;
     const conv = await conversationStore.getOrCreate(chatId, rootId);
+    const pendingText = conv.pendingUserText;
     conv.sessionState = SessionState.Idle;
+    conv.messages = [];
+    conv.docType = null;
+    conv.containerId = null;
+    conv.pendingUserText = null;
     await conversationStore.save(chatId, rootId, conv);
+
+    if (pendingText) {
+      await processMessage(
+        ctx,
+        chatId,
+        rootId,
+        undefined,
+        pendingText,
+        conversationStore,
+        claudeClient,
+        config,
+      );
+      return;
+    }
 
     await ctx.reply("🆕 ¿Qué documento necesitas?", { reply_markup: getDocTypeKeyboard() });
   });

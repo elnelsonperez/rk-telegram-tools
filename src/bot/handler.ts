@@ -153,8 +153,11 @@ export async function processMessage(
     }
   }
 
-  // 2. Stale session check
+  // 2. Stale session check. Stash the triggering message so the resume/new
+  //    callbacks can replay it instead of asking the user to retype.
   if (conv.sessionState !== SessionState.Idle && isStale(conv.lastActivity)) {
+    conv.pendingUserText = userText;
+    await conversationStore.save(chatId, rootId, conv);
     const sent = await ctx.reply("⏰ Pasaron más de 15 minutos. ¿Continúas o empiezas de nuevo?", {
       reply_to_message_id: replyToMsgId,
       reply_markup: getResumeKeyboard(),

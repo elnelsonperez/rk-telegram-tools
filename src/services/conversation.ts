@@ -10,6 +10,9 @@ export interface Conversation {
   containerId: string | null;
   docType: string | null;
   lastActivity: Date;
+  /** Text the user sent that triggered a stale-session prompt, stashed so
+   *  the resume/new callbacks can process it without re-asking. */
+  pendingUserText: string | null;
 }
 
 export interface ActiveConversationRef {
@@ -27,7 +30,7 @@ export class ConversationStore {
       `INSERT INTO conversations (chat_id, root_message_id)
        VALUES ($1, $2)
        ON CONFLICT (chat_id, root_message_id) DO UPDATE SET chat_id = conversations.chat_id
-       RETURNING messages, session_state, container_id, doc_type, last_activity`,
+       RETURNING messages, session_state, container_id, doc_type, last_activity, pending_user_text`,
       [chatId, rootMessageId],
     );
     const row = result.rows[0];
@@ -37,6 +40,7 @@ export class ConversationStore {
       containerId: row.container_id,
       docType: row.doc_type,
       lastActivity: row.last_activity,
+      pendingUserText: row.pending_user_text,
     };
   }
 
@@ -62,13 +66,19 @@ export class ConversationStore {
   async save(chatId: number, rootMessageId: number, conv: Conversation): Promise<void> {
     await this.pool.query(
       `UPDATE conversations
-       SET messages = $1, session_state = $2, container_id = $3, doc_type = $4, last_activity = NOW()
-       WHERE chat_id = $5 AND root_message_id = $6`,
+       SET messages = $1,
+           session_state = $2,
+           container_id = $3,
+           doc_type = $4,
+           pending_user_text = $5,
+           last_activity = NOW()
+       WHERE chat_id = $6 AND root_message_id = $7`,
       [
         JSON.stringify(conv.messages),
         conv.sessionState,
         conv.containerId,
         conv.docType,
+        conv.pendingUserText,
         chatId,
         rootMessageId,
       ],

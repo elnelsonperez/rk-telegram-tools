@@ -28,6 +28,11 @@ export async function runMigrations(pool: pg.Pool): Promise<void> {
   `);
 
   await pool.query(`
+    ALTER TABLE conversations
+    ADD COLUMN IF NOT EXISTS pending_user_text TEXT
+  `);
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS message_registry (
       chat_id BIGINT NOT NULL,
       message_id BIGINT NOT NULL,
